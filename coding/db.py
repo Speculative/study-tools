@@ -24,3 +24,13 @@ def _init_schema(db: sqlite_utils.Database) -> None:
             "start_seconds": int,
         }, pk="id", not_null={"pid", "name", "start_seconds"})
         db["sections"].create_index(["pid", "start_seconds"])
+
+    if "notes" not in db.table_names():
+        db["notes"].create({
+            "id": int,
+            "pid": str,
+            "text": str,
+            "start_seconds": int,
+            "end_seconds": int,  # NULL for instantaneous notes
+        }, pk="id", not_null={"pid", "text", "start_seconds"})
+        db["notes"].create_index(["pid", "start_seconds"])

@@ -29,6 +29,11 @@
           <span style="font-size:0.75rem; color:#6b7280; white-space:nowrap;">Sections:</span>
           <span id="sections-nav-empty" style="font-size:0.75rem; color:#9ca3af; font-style:italic;">none yet — press S to add</span>
         </div>
+        <!-- Note range indicator -->
+        <div id="note-range-indicator" style="display:none; padding:2px 12px 6px; font-size:0.75rem; color:#92400e; background:#fef3c7;">
+          ⏺ Range note started — press <kbd style="font-size:0.7rem; padding:0 3px; border:1px solid #d97706; border-radius:2px;">Shift+N</kbd> to end
+          <button onclick="cancelNoteRange()" style="margin-left:8px; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer;">✕ cancel</button>
+        </div>
       </div>
 
     </div>
@@ -56,6 +61,24 @@
             {% for row in rows %}
               {% if row.type == "section" %}
                 {% with sec = row %}{% include "_section_row.html" %}{% endwith %}
+              {% elif row.type in ("note_instant", "note_start", "note_end") %}
+                <tr class="note-row note-{{ row.type.split('_')[1] }}"
+                    data-note-id="{{ row.id }}"
+                    data-note-start="{{ row.start_seconds }}"
+                    {% if row.end_seconds %}data-note-end="{{ row.end_seconds }}"{% endif %}
+                    style="border-top:1px solid #fde68a; background:#fffbeb; cursor:pointer;">
+                  <td style="padding:5px 8px; color:#92400e; white-space:nowrap; overflow:hidden; font-size:0.8rem;">
+                    {% if row.type == "note_end" %}{{ row.end_ts }}{% else %}{{ row.start_ts }}{% endif %}
+                  </td>
+                  <td style="padding:5px 8px; color:#92400e; font-size:0.75rem; white-space:nowrap;">
+                    {% if row.type == "note_start" %}▶ note{% elif row.type == "note_end" %}◀ note{% else %}♪ note{% endif %}
+                  </td>
+                  <td style="padding:5px 8px; word-break:break-word; color:#78350f;">
+                    <span class="note-text">{{ row.text }}</span>
+                    <button class="note-delete-btn" data-note-id="{{ row.id }}"
+                            style="float:right; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer; padding:0 2px; line-height:1;">✕</button>
+                  </td>
+                </tr>
               {% else %}
                 <tr data-start="{{ row.start_seconds }}"
                     data-section-id="{{ row.section_id or '' }}"
@@ -207,6 +230,13 @@
   // ---------------------------------------------------------------------------
   function attachTranscriptHandlers() {
     document.getElementById("transcript-body").addEventListener("click", (e) => {
+      const noteDelBtn = e.target.closest(".note-delete-btn");
+      if (noteDelBtn) {
+        e.stopPropagation();
+        deleteNote(parseInt(noteDelBtn.getAttribute("data-note-id")));
+        return;
+      }
+
       const delBtn = e.target.closest(".section-delete-btn");
       if (delBtn) {
         e.stopPropagation();
@@ -218,6 +248,19 @@
       if (header) {
         const secId = header.getAttribute("data-section-id");
         setSectionCollapsed(secId, !_collapsed.has(secId));
+        return;
+      }
+
+      const noteRow = e.target.closest("tr.note-row");
+      if (noteRow) {
+        const player = window.__vds;
+        const start = parseFloat(noteRow.getAttribute("data-note-start"));
+        if (Number.isFinite(start) && player) {
+          player.currentTime = start;
+          player.controls.show();
+          syncTranscript(start);
+          player.play();
+        }
         return;
       }
 
@@ -427,6 +470,154 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Notes
+  // ---------------------------------------------------------------------------
+  let _noteRangeStart = null;  // { seconds } when a range note is in progress
+
+  function findInsertionPoint(atSeconds) {
+    const tbody = document.getElementById("transcript-body");
+    const allRows = Array.from(tbody.querySelectorAll(
+      "tr[data-start], tr.section-header[data-section-start], tr.note-row"
+    ));
+    let insertAfter = null;
+    for (const row of allRows) {
+      const t = parseFloat(
+        row.getAttribute("data-start") ??
+        row.getAttribute("data-section-start") ??
+        row.getAttribute("data-note-start") ?? "0"
+      );
+      if (t <= atSeconds) insertAfter = row;
+      else break;
+    }
+    return insertAfter;
+  }
+
+  function insertNoteInput(atSeconds, isRangeEnd) {
+    const existing = document.getElementById("note-input-row");
+    if (existing) return;
+
+    const tbody = document.getElementById("transcript-body");
+    // For range notes, the input appears at the end time but the note_start row
+    // will be placed at rangeStartSeconds — use end time for input placement.
+    const insertAfter = findInsertionPoint(atSeconds);
+
+    const label = isRangeEnd
+      ? `Note (${secondsToTs(_noteRangeStart.seconds)}–${secondsToTs(atSeconds)})`
+      : `Note @ ${secondsToTs(atSeconds)}`;
+
+    const inputRow = document.createElement("tr");
+    inputRow.id = "note-input-row";
+    inputRow.style.cssText = "background:#fffbeb; border-top:2px solid #fbbf24;";
+    inputRow.innerHTML = `
+      <td style="padding:5px 8px; color:#92400e; white-space:nowrap; font-size:0.8rem;">${secondsToTs(atSeconds)}</td>
+      <td colspan="2" style="padding:4px 8px;">
+        <span style="font-size:0.75rem; color:#92400e; margin-right:6px;">${label}</span>
+        <input id="note-input-field" type="text" placeholder="Note text…"
+               style="width:60%; font-size:0.85rem; padding:2px 4px; border:1px solid #fbbf24; border-radius:3px; background:transparent;" />
+      </td>`;
+
+    if (insertAfter) insertAfter.after(inputRow);
+    else tbody.prepend(inputRow);
+
+    const input = document.getElementById("note-input-field");
+    input.focus();
+
+    input.addEventListener("keydown", async (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const text = input.value.trim();
+        if (!text) { cancelNoteInput(); return; }
+        await confirmNote(text, atSeconds, isRangeEnd ? _noteRangeStart.seconds : null);
+      } else if (e.key === "Escape") {
+        cancelNoteInput();
+      }
+    });
+  }
+
+  function cancelNoteInput() {
+    document.getElementById("note-input-row")?.remove();
+    _noteRangeStart = null;
+    document.getElementById("note-range-indicator").style.display = "none";
+  }
+
+  function cancelNoteRange() {
+    _noteRangeStart = null;
+    document.getElementById("note-range-indicator").style.display = "none";
+  }
+
+  async function confirmNote(text, atSeconds, rangeStartSeconds) {
+    const payload = { text, start_seconds: rangeStartSeconds ?? atSeconds };
+    if (rangeStartSeconds !== null && rangeStartSeconds !== undefined) {
+      payload.start_seconds = Math.min(rangeStartSeconds, atSeconds);
+      payload.end_seconds = Math.max(rangeStartSeconds, atSeconds);
+    }
+
+    const res = await fetch(`/api/sessions/${PID}/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) { cancelNoteInput(); return; }
+
+    const note = await res.json();
+    const inputRow = document.getElementById("note-input-row");
+    inputRow.remove();
+    _noteRangeStart = null;
+    document.getElementById("note-range-indicator").style.display = "none";
+
+    const isRange = note.end_seconds != null && note.end_seconds !== note.start_seconds;
+    const tbody = document.getElementById("transcript-body");
+
+    if (isRange) {
+      // Insert note_start at start position
+      const startInsert = findInsertionPoint(note.start_seconds);
+      const startRow = buildNoteRow(note, "note_start");
+      if (startInsert) startInsert.after(startRow);
+      else tbody.prepend(startRow);
+
+      // Insert note_end at end position
+      const endInsert = findInsertionPoint(note.end_seconds);
+      const endRow = buildNoteRow(note, "note_end");
+      if (endInsert) endInsert.after(endRow);
+      else tbody.prepend(endRow);
+    } else {
+      const insertPt = findInsertionPoint(note.start_seconds);
+      const newRow = buildNoteRow(note, "note_instant");
+      if (insertPt) insertPt.after(newRow);
+      else tbody.prepend(newRow);
+    }
+  }
+
+  function buildNoteRow(note, type) {
+    const tr = document.createElement("tr");
+    tr.className = `note-row note-${type.split("_")[1]}`;
+    tr.setAttribute("data-note-id", note.id);
+    tr.setAttribute("data-note-start", note.start_seconds);
+    if (note.end_seconds) tr.setAttribute("data-note-end", note.end_seconds);
+    tr.style.cssText = "border-top:1px solid #fde68a; background:#fffbeb; cursor:pointer;";
+
+    const timeLabel = type === "note_end"
+      ? (note.end_ts ?? secondsToTs(note.end_seconds))
+      : note.start_ts;
+    const typeLabel = type === "note_start" ? "▶ note" : type === "note_end" ? "◀ note" : "♪ note";
+
+    tr.innerHTML = `
+      <td style="padding:5px 8px; color:#92400e; white-space:nowrap; overflow:hidden; font-size:0.8rem;">${timeLabel}</td>
+      <td style="padding:5px 8px; color:#92400e; font-size:0.75rem; white-space:nowrap;">${typeLabel}</td>
+      <td style="padding:5px 8px; word-break:break-word; color:#78350f;">
+        <span class="note-text">${escHtml(note.text)}</span>
+        <button class="note-delete-btn" data-note-id="${note.id}"
+                style="float:right; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer; padding:0 2px; line-height:1;">✕</button>
+      </td>`;
+    return tr;
+  }
+
+  async function deleteNote(noteId) {
+    await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
+    document.querySelectorAll(`.note-row[data-note-id="${noteId}"]`).forEach(r => r.remove());
+  }
+
+  // ---------------------------------------------------------------------------
   // Hotkeys
   // ---------------------------------------------------------------------------
   function attachHotkeyHandlers() {
@@ -453,6 +644,23 @@
       } else if (e.code === "KeyS") {
         e.preventDefault();
         insertSectionInput(Math.floor(player.currentTime));
+      } else if (e.code === "KeyN") {
+        e.preventDefault();
+        const t = Math.floor(player.currentTime);
+        if (e.shiftKey) {
+          // Shift+N: start or end a range note
+          if (_noteRangeStart === null) {
+            _noteRangeStart = { seconds: t };
+            document.getElementById("note-range-indicator").style.display = "";
+          } else {
+            document.getElementById("note-range-indicator").style.display = "none";
+            insertNoteInput(t, true);
+          }
+        } else {
+          // n: instantaneous note
+          _noteRangeStart = null;
+          insertNoteInput(t, false);
+        }
       }
     });
   }

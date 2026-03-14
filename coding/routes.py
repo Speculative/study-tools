@@ -57,32 +57,75 @@ def _seconds_to_ts(s: int) -> str:
     return f"{h:02d}:{m:02d}:{sec:02d}"
 
 
-def _merge_rows(utterances: list[dict], sections: list[dict]) -> list[dict]:
+def _merge_rows(utterances: list[dict], sections: list[dict], notes: list[dict]) -> list[dict]:
     """Merge utterances and sections into a single time-ordered list of rows.
 
-    Each row has a 'type' key of 'utterance' or 'section', plus a 'section_id'
-    key on utterances indicating which section they belong to (None if before any section).
+    Each row has a 'type' key of 'utterance', 'section', 'note_instant',
+    'note_start', or 'note_end', plus a 'section_id' key on utterances.
+
+    Range notes with content between start/end emit two rows ('note_start' and
+    'note_end'). If nothing falls between them they emit a single 'note_instant'
+    row instead.
     """
+    # Expand range notes into synthetic events
+    events: list[dict] = []
+    for n in notes:
+        if n.get("end_seconds") is not None:
+            events.append({"_event": "note_start", "_note": n, "_t": n["start_seconds"]})
+            events.append({"_event": "note_end",   "_note": n, "_t": n["end_seconds"]})
+        else:
+            events.append({"_event": "note_instant", "_note": n, "_t": n["start_seconds"]})
+
+    # Merge all three streams by time
+    all_items: list[tuple[int, int, dict]] = []  # (seconds, kind_order, item)
+    # kind_order: sections=0, note events=1, utterances=2 (sections/notes before utterances at same time)
+    for s in sections:
+        all_items.append((s["start_seconds"], 0, {"type": "section", **s}))
+    for e in events:
+        all_items.append((e["_t"], 1, e))
+    for u in utterances:
+        all_items.append((u["start_seconds"], 2, {"type": "utterance", **u}))
+
+    all_items.sort(key=lambda x: (x[0], x[1]))
+
     rows = []
-    ui, si = 0, 0
     current_section_id = None
 
-    while ui < len(utterances) or si < len(sections):
-        take_section = (
-            si < len(sections) and (
-                ui >= len(utterances) or
-                sections[si]["start_seconds"] <= utterances[ui]["start_seconds"]
-            )
-        )
-        if take_section:
-            sec = sections[si]
-            current_section_id = sec["id"]
-            rows.append({"type": "section", **sec})
-            si += 1
+    # Track which range notes have emitted a start_row to decide instant vs split
+    note_start_row_idx: dict[int, int] = {}  # note_id -> index of note_start row in rows[]
+
+    for _, _, item in all_items:
+        if item.get("type") == "section":
+            current_section_id = item["id"]
+            rows.append(item)
+        elif item.get("_event") == "note_start":
+            n = item["_note"]
+            idx = len(rows)
+            note_start_row_idx[n["id"]] = idx
+            rows.append({"type": "note_start", **n})
+        elif item.get("_event") == "note_instant":
+            n = item["_note"]
+            rows.append({"type": "note_instant", **n})
+        elif item.get("_event") == "note_end":
+            n = item["_note"]
+            start_idx = note_start_row_idx.get(n["id"])
+            # Check if any utterance/section rows landed between start and now
+            between = any(
+                rows[i].get("type") in ("utterance", "section")
+                for i in range(start_idx + 1, len(rows))
+            ) if start_idx is not None else True
+            if between:
+                rows.append({"type": "note_end", **n})
+            else:
+                # Collapse into a single instant row
+                if start_idx is not None:
+                    rows[start_idx] = {"type": "note_instant", **n}
+                else:
+                    rows.append({"type": "note_instant", **n})
         else:
-            utt = utterances[ui]
-            rows.append({"type": "utterance", "section_id": current_section_id, **utt})
-            ui += 1
+            # utterance
+            item["section_id"] = current_section_id
+            rows.append(item)
 
     return rows
 
@@ -123,7 +166,13 @@ def session(pid: str):
     for s in sections:
         s["start_ts"] = _seconds_to_ts(s["start_seconds"])
 
-    rows = _merge_rows(utterances, sections)
+    notes = list(db["notes"].rows_where("pid = ?", [pid], order_by="start_seconds"))
+    for n in notes:
+        n["start_ts"] = _seconds_to_ts(n["start_seconds"])
+        if n.get("end_seconds") is not None:
+            n["end_ts"] = _seconds_to_ts(n["end_seconds"])
+
+    rows = _merge_rows(utterances, sections, notes)
 
     return render_template("session.html", pid=pid, rows=rows, sections=sections)
 
@@ -181,4 +230,36 @@ def add_section(pid: str):
 def delete_section(section_id: int):
     db = get_db()
     db["sections"].delete(section_id)
+    return "", 200
+
+
+# ---------------------------------------------------------------------------
+# Notes API
+# ---------------------------------------------------------------------------
+
+@bp.post("/api/sessions/<pid>/notes")
+def add_note(pid: str):
+    payload = request.get_json(silent=True) or {}
+    text = payload.get("text", "").strip()
+    start_seconds = payload.get("start_seconds")
+    end_seconds = payload.get("end_seconds")  # optional
+    if not text or start_seconds is None:
+        return jsonify({"error": "text and start_seconds required"}), 400
+
+    row = {"pid": pid, "text": text, "start_seconds": int(start_seconds)}
+    if end_seconds is not None:
+        row["end_seconds"] = int(end_seconds)
+
+    db = get_db()
+    row_id = db["notes"].insert(row).last_pk
+    note = {**row, "id": row_id, "start_ts": _seconds_to_ts(int(start_seconds))}
+    if end_seconds is not None:
+        note["end_ts"] = _seconds_to_ts(int(end_seconds))
+    return jsonify(note)
+
+
+@bp.delete("/api/notes/<int:note_id>")
+def delete_note(note_id: int):
+    db = get_db()
+    db["notes"].delete(note_id)
     return "", 200
