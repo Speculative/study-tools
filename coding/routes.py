@@ -174,7 +174,7 @@ def session(pid: str):
 
     rows = _merge_rows(utterances, sections, notes)
 
-    return render_template("session.html", pid=pid, rows=rows, sections=sections)
+    return render_template("session.html", pid=pid, rows=rows, sections=sections, notes=notes)
 
 
 @bp.get("/video/<pid>")

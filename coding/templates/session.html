@@ -23,16 +23,30 @@
 
       <div id="hresize" style="flex:0 0 5px; background:#e5e7eb; cursor:row-resize; user-select:none;" title="Drag to resize · Double-click to fit"></div>
 
-      <div id="tools-pane" style="flex:0 0 120px; min-height:40px; overflow:auto; background:#f3f4f6; border-top:1px solid #e5e7eb;">
-        <!-- Sections nav -->
-        <div id="sections-nav" style="padding:8px 12px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
-          <span style="font-size:0.75rem; color:#6b7280; white-space:nowrap;">Sections:</span>
-          <span id="sections-nav-empty" style="font-size:0.75rem; color:#9ca3af; font-style:italic;">none yet — press S to add</span>
-        </div>
+      <div id="tools-pane" style="flex:0 0 120px; min-height:80px; overflow:hidden; background:#f3f4f6; border-top:1px solid #e5e7eb; display:flex; flex-direction:column;">
         <!-- Note range indicator -->
-        <div id="note-range-indicator" style="display:none; padding:2px 12px 6px; font-size:0.75rem; color:#92400e; background:#fef3c7;">
+        <div id="note-range-indicator" style="display:none; flex:0 0 auto; padding:2px 12px 4px; font-size:0.75rem; color:#92400e; background:#fef3c7;">
           ⏺ Range note started — press <kbd style="font-size:0.7rem; padding:0 3px; border:1px solid #d97706; border-radius:2px;">Shift+N</kbd> to end
           <button onclick="cancelNoteRange()" style="margin-left:8px; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer;">✕ cancel</button>
+        </div>
+        <!-- Timeline -->
+        <div id="timeline-container" style="flex:1 1 0; min-height:0; position:relative; cursor:crosshair;">
+          <svg id="timeline-svg" style="width:100%; height:100%; display:block; overflow:visible;">
+            <defs>
+              <clipPath id="timeline-clip">
+                <rect id="timeline-clip-rect" x="0" y="0" width="100%" height="100%"/>
+              </clipPath>
+            </defs>
+            <!-- sections layer -->
+            <g id="tl-sections"></g>
+            <!-- time axis -->
+            <g id="tl-axis"></g>
+            <!-- notes layer -->
+            <g id="tl-notes"></g>
+            <!-- playhead -->
+            <line id="tl-playhead" x1="0" y1="0" x2="0" y2="100%"
+                  stroke="#ef4444" stroke-width="1.5" pointer-events="none"/>
+          </svg>
         </div>
       </div>
 
@@ -117,7 +131,9 @@
 
     player.addEventListener("time-update", () => {
       syncTranscript(player.currentTime);
+      updateTimelinePlayhead(player.currentTime);
     });
+
 
     for (const evname of ["loaded-metadata", "can-play", "can-play-through", "loaded-data", "stream-type-change", "media-type-change"]) {
       player.addEventListener(evname, () => {
@@ -165,36 +181,36 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Seek-bar chapters
+  // State — sections and notes as the single source of truth
   // ---------------------------------------------------------------------------
   let _sections = {{ sections|tojson }};
+  let _notes = {{ notes|tojson }};
 
-  function toVttTime(s) {
-    const h = Math.floor(s / 3600).toString().padStart(2, "0");
-    const m = Math.floor((s % 3600) / 60).toString().padStart(2, "0");
-    const sec = (s % 60).toString().padStart(2, "0");
-    return `${h}:${m}:${sec}.000`;
+  function _mutateSection(added, removedId) {
+    if (added) {
+      _sections.push(added);
+      _sections.sort((a, b) => a.start_seconds - b.start_seconds);
+    }
+    if (removedId != null) {
+      _sections = _sections.filter(s => s.id !== removedId);
+    }
+    rebuildUtteranceSectionIds();
+    renderTimeline();
   }
 
-  function rebuildChaptersTrack() {
-    document.querySelectorAll("#player-target track[kind='chapters']").forEach(t => t.remove());
-    if (!_sections.length) return;
-    const videoEl = document.querySelector("#player-target video");
-    if (!videoEl) return;
-
-    let vtt = "WEBVTT\n\n";
-    _sections.forEach((sec, i) => {
-      const end = _sections[i + 1] ? _sections[i + 1].start_seconds : 999999;
-      vtt += `${toVttTime(sec.start_seconds)} --> ${toVttTime(end)}\n${sec.name}\n\n`;
-    });
-
-    const url = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
-    const track = document.createElement("track");
-    track.kind = "chapters";
-    track.src = url;
-    track.default = true;
-    videoEl.appendChild(track);
+  function _mutateNote(added, removedId) {
+    if (added) {
+      const existing = _notes.findIndex(n => n.id === added.id);
+      if (existing >= 0) _notes[existing] = added;
+      else _notes.push(added);
+      _notes.sort((a, b) => a.start_seconds - b.start_seconds);
+    }
+    if (removedId != null) {
+      _notes = _notes.filter(n => n.id !== removedId);
+    }
+    renderTimeline();
   }
+
 
   // ---------------------------------------------------------------------------
   // Transcript sync
@@ -259,29 +275,10 @@
       }
 
       const noteRow = e.target.closest("tr.note-row");
-      if (noteRow) {
-        const player = window.__vds;
-        const start = parseFloat(noteRow.getAttribute("data-note-start"));
-        if (Number.isFinite(start) && player) {
-          player.currentTime = start;
-          player.controls.show();
-          syncTranscript(start);
-          player.play();
-        }
-        return;
-      }
+      if (noteRow) { seekTo(parseFloat(noteRow.getAttribute("data-note-start"))); return; }
 
       const row = e.target.closest("tr[data-start]");
-      if (row) {
-        const player = window.__vds;
-        const start = parseFloat(row.getAttribute("data-start"));
-        if (Number.isFinite(start) && player) {
-          player.currentTime = start;
-          player.controls.show();
-          syncTranscript(start);
-          player.play();
-        }
-      }
+      if (row) seekTo(parseFloat(row.getAttribute("data-start")));
     });
   }
 
@@ -406,29 +403,20 @@
     inputRow.replaceWith(newRow);
     _sectionInputActive = false;
 
-    // Update _sections for chapter track
     const sec = {
       id: parseInt(newRow.getAttribute("data-section-id")),
       start_seconds: parseInt(newRow.getAttribute("data-section-start")),
+      start_ts: secondsToTs(parseInt(newRow.getAttribute("data-section-start"))),
       name,
     };
-    _sections.push(sec);
-    _sections.sort((a, b) => a.start_seconds - b.start_seconds);
-
-    // Assign section id to utterances that now belong to this section
-    rebuildUtteranceSectionIds();
-    rebuildChaptersTrack();
-    renderSectionsNav();
+    _mutateSection(sec, null);
   }
 
   async function deleteSection(secId) {
     await fetch(`/api/sections/${secId}`, { method: "DELETE" });
     document.querySelector(`.section-header[data-section-id="${secId}"]`)?.remove();
     _collapsed.delete(String(secId));
-    _sections = _sections.filter(s => s.id !== secId);
-    rebuildUtteranceSectionIds();
-    rebuildChaptersTrack();
-    renderSectionsNav();
+    _mutateSection(null, secId);
   }
 
   // Walk the DOM in order, propagate current section-id to utterance rows.
@@ -444,37 +432,6 @@
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Sections nav (buttons below the video)
-  // ---------------------------------------------------------------------------
-  function renderSectionsNav() {
-    const nav = document.getElementById("sections-nav");
-    const empty = document.getElementById("sections-nav-empty");
-    // Remove existing buttons (keep the label and empty notice)
-    nav.querySelectorAll("button.section-nav-btn").forEach(b => b.remove());
-
-    if (_sections.length === 0) {
-      empty.style.display = "";
-      return;
-    }
-    empty.style.display = "none";
-
-    _sections.forEach(sec => {
-      const btn = document.createElement("button");
-      btn.className = "section-nav-btn";
-      btn.textContent = sec.name;
-      btn.title = secondsToTs(sec.start_seconds);
-      btn.style.cssText = "font-size:0.75rem; padding:2px 8px; border-radius:9999px; border:1px solid #c7d2fe; background:#e0e7ff; color:#3730a3; cursor:pointer; white-space:nowrap;";
-      btn.addEventListener("click", () => {
-        const player = window.__vds;
-        if (!player) return;
-        player.currentTime = sec.start_seconds;
-        player.controls.show();
-        syncTranscript(sec.start_seconds);
-      });
-      nav.appendChild(btn);
-    });
-  }
 
   // ---------------------------------------------------------------------------
   // Notes
@@ -572,6 +529,8 @@
     _noteRangeStart = null;
     document.getElementById("note-range-indicator").style.display = "none";
 
+    _mutateNote(note, null);
+
     const isRange = note.end_seconds != null && note.end_seconds !== note.start_seconds;
     const tbody = document.getElementById("transcript-body");
 
@@ -622,6 +581,7 @@
   async function deleteNote(noteId) {
     await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
     document.querySelectorAll(`.note-row[data-note-id="${noteId}"]`).forEach(r => r.remove());
+    _mutateNote(null, noteId);
   }
 
   function startNoteEdit(span) {
@@ -646,6 +606,8 @@
       // Update all rows sharing this note id (note_start + note_end both show text)
       document.querySelectorAll(`.note-row[data-note-id="${noteId}"] .note-text`)
         .forEach(s => s.textContent = text);
+      const n = _notes.find(n => n.id === parseInt(noteId));
+      if (n) _mutateNote({ ...n, text }, null);
     }
 
     input.addEventListener("keydown", async (e) => {
@@ -671,14 +633,10 @@
         player.paused ? player.play() : player.pause();
       } else if (e.code === "ArrowLeft") {
         e.preventDefault();
-        player.currentTime = Math.max(0, player.currentTime - (e.ctrlKey ? 30 : 5));
-        player.controls.show();
-        syncTranscript(player.currentTime);
+        seekTo(Math.max(0, player.currentTime - (e.ctrlKey ? 30 : 5)));
       } else if (e.code === "ArrowRight") {
         e.preventDefault();
-        player.currentTime = player.currentTime + (e.ctrlKey ? 30 : 5);
-        player.controls.show();
-        syncTranscript(player.currentTime);
+        seekTo(player.currentTime + (e.ctrlKey ? 30 : 5));
       } else if (e.code === "KeyS") {
         e.preventDefault();
         insertSectionInput(Math.floor(player.currentTime));
@@ -784,6 +742,268 @@
       .map(n => String(n).padStart(2,"0")).join(":");
   }
 
+  function seekTo(t) {
+    const player = window.__vds;
+    if (!Number.isFinite(t) || !player) return;
+    player.currentTime = t;
+    player.controls.show();
+    syncTranscript(t);
+    updateTimelinePlayhead(t);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Timeline
+  // ---------------------------------------------------------------------------
+
+  // Section colours — cycle through a palette by index
+  const TL_SECTION_COLORS = [
+    "#c7d2fe", "#a5f3fc", "#bbf7d0", "#fde68a", "#fecaca",
+    "#ddd6fe", "#fed7aa", "#d9f99d", "#e9d5ff",
+  ];
+
+  // Layout constants (px, logical — SVG uses viewBox so these are just ratios)
+  const TL = {
+    TRACK_Y: 28,       // top of section track band
+    TRACK_H: 22,       // height of section track band
+    AXIS_Y: 50,        // y of the time axis labels row
+    NOTE_TOP_Y: 56,    // where annotation stems start below the track
+    NOTE_LANE_H: 32,   // height reserved per annotation lane
+  };
+
+  function _tlDuration() {
+    return window.__vds?.duration || 0;
+  }
+
+  function _tlWidth() {
+    return document.getElementById("timeline-svg")?.getBoundingClientRect().width || 1;
+  }
+
+  function _tToX(t, duration, width) {
+    if (!duration) return 0;
+    return (t / duration) * width;
+  }
+
+  function _svgEl(tag, attrs) {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  }
+
+  function _svgText(text, attrs, title) {
+    const el = _svgEl("text", attrs);
+    el.textContent = text;
+    if (title) {
+      const t = _svgEl("title", {});
+      t.textContent = title;
+      el.appendChild(t);
+    }
+    return el;
+  }
+
+  function renderTimeline() {
+    const duration = _tlDuration();
+    const svg = document.getElementById("timeline-svg");
+    if (!svg) return;
+
+    const width = _tlWidth();
+    const svgH = svg.getBoundingClientRect().height || 100;
+
+    // Update clip rect
+    const clipRect = document.getElementById("timeline-clip-rect");
+    if (clipRect) { clipRect.setAttribute("width", width); clipRect.setAttribute("height", svgH); }
+
+    // Clear mutable layers
+    const secG   = document.getElementById("tl-sections");
+    const axisG  = document.getElementById("tl-axis");
+    const notesG = document.getElementById("tl-notes");
+    secG.innerHTML = "";
+    axisG.innerHTML = "";
+    notesG.innerHTML = "";
+
+    if (!duration) {
+      // No video loaded yet — draw empty track outline
+      secG.appendChild(_svgEl("rect", {
+        x: 0, y: TL.TRACK_Y, width, height: TL.TRACK_H,
+        fill: "#e5e7eb", rx: 3,
+      }));
+      return;
+    }
+
+    // ── Section track ──────────────────────────────────────────────────────
+    if (_sections.length === 0) {
+      // Single unsectioned bar
+      secG.appendChild(_svgEl("rect", {
+        x: 0, y: TL.TRACK_Y, width, height: TL.TRACK_H,
+        fill: "#e5e7eb", rx: 3,
+      }));
+    } else {
+      _sections.forEach((sec, i) => {
+        const x1 = _tToX(sec.start_seconds, duration, width);
+        const x2 = _sections[i + 1]
+          ? _tToX(_sections[i + 1].start_seconds, duration, width)
+          : width;
+        const w  = Math.max(1, x2 - x1);
+        const color = TL_SECTION_COLORS[i % TL_SECTION_COLORS.length];
+
+        const rect = _svgEl("rect", {
+          x: x1, y: TL.TRACK_Y, width: w, height: TL.TRACK_H,
+          fill: color, stroke: "#fff", "stroke-width": 1, rx: 2,
+          "data-section-id": sec.id,
+          style: "cursor:pointer",
+        });
+        rect.addEventListener("click", (e) => {
+          e.stopPropagation();
+          seekTo(sec.start_seconds);
+        });
+        secG.appendChild(rect);
+
+        // Label — only if band is wide enough; clip to band width
+        if (w > 24) {
+          const clipId = `tl-sec-clip-${sec.id}`;
+          const cp = _svgEl("clipPath", { id: clipId });
+          cp.appendChild(_svgEl("rect", { x: x1 + 1, y: TL.TRACK_Y, width: w - 2, height: TL.TRACK_H }));
+          secG.appendChild(cp);
+          const label = _svgText(sec.name, {
+            x: x1 + 5, y: TL.TRACK_Y + TL.TRACK_H / 2 + 4,
+            "font-size": 10, fill: "#1e1b4b",
+            "clip-path": `url(#${clipId})`,
+            style: "pointer-events:none; user-select:none;",
+          }, sec.name);
+          secG.appendChild(label);
+        }
+
+        // Section boundary tick
+        if (i > 0) {
+          secG.appendChild(_svgEl("line", {
+            x1, y1: TL.TRACK_Y, x2: x1, y2: TL.TRACK_Y + TL.TRACK_H,
+            stroke: "#fff", "stroke-width": 1.5,
+          }));
+        }
+      });
+    }
+
+    // ── Time axis ──────────────────────────────────────────────────────────
+    // Pick a reasonable tick interval
+    const targetTicks = Math.min(12, Math.max(4, Math.floor(width / 80)));
+    const rawInterval = duration / targetTicks;
+    // Round to nice values: 5, 10, 15, 30, 60, 120, 300, 600 …
+    const niceIntervals = [5, 10, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600];
+    const interval = niceIntervals.find(n => n >= rawInterval) ?? 3600;
+
+    for (let t = 0; t <= duration; t += interval) {
+      const x = _tToX(t, duration, width);
+      axisG.appendChild(_svgEl("line", {
+        x1: x, y1: TL.TRACK_Y + TL.TRACK_H, x2: x, y2: TL.AXIS_Y - 2,
+        stroke: "#9ca3af", "stroke-width": 0.5,
+      }));
+      axisG.appendChild(_svgText(secondsToTs(t), {
+        x, y: TL.AXIS_Y + 2,
+        "font-size": 9, fill: "#6b7280", "text-anchor": "middle",
+        style: "pointer-events:none; user-select:none;",
+      }));
+    }
+
+    // ── Notes ──────────────────────────────────────────────────────────────
+    // Simple lane assignment: greedy left-to-right by end time
+    // Each note occupies a lane; lanes stack downward.
+    const laneEndX = [];  // tracks the rightmost x used in each lane
+
+    function assignLane(x1, x2) {
+      for (let i = 0; i < laneEndX.length; i++) {
+        if (laneEndX[i] <= x1 - 4) { laneEndX[i] = x2; return i; }
+      }
+      laneEndX.push(x2);
+      return laneEndX.length - 1;
+    }
+
+    _notes.forEach(note => {
+      const isRange = note.end_seconds != null;
+      const x1 = _tToX(note.start_seconds, duration, width);
+      const x2 = isRange ? _tToX(note.end_seconds, duration, width) : x1;
+      const lane = assignLane(x1, x2 + 4);
+      const noteY = TL.NOTE_TOP_Y + lane * TL.NOTE_LANE_H;
+      const midX  = isRange ? (x1 + x2) / 2 : x1;
+
+      const g = _svgEl("g", {
+        "data-note-id": note.id,
+        style: "cursor:pointer",
+      });
+      g.addEventListener("click", (e) => {
+        e.stopPropagation();
+        seekTo(note.start_seconds);
+      });
+
+      if (isRange) {
+        // Horizontal span bar
+        g.appendChild(_svgEl("rect", {
+          x: x1, y: noteY + 6, width: Math.max(2, x2 - x1), height: 8,
+          fill: "#fde68a", stroke: "#d97706", "stroke-width": 1, rx: 2,
+        }));
+        // End caps
+        g.appendChild(_svgEl("line", {
+          x1, y1: noteY + 4, x2: x1, y2: noteY + 16,
+          stroke: "#d97706", "stroke-width": 1.5,
+        }));
+        g.appendChild(_svgEl("line", {
+          x1: x2, y1: noteY + 4, x2, y2: noteY + 16,
+          stroke: "#d97706", "stroke-width": 1.5,
+        }));
+        // Stem from mid of bar up to track
+        g.appendChild(_svgEl("line", {
+          x1: midX, y1: TL.TRACK_Y + TL.TRACK_H, x2: midX, y2: noteY + 10,
+          stroke: "#d97706", "stroke-width": 0.75, "stroke-dasharray": "2,2",
+        }));
+      } else {
+        // Instant note: stem + diamond
+        g.appendChild(_svgEl("line", {
+          x1, y1: TL.TRACK_Y + TL.TRACK_H, x2: x1, y2: noteY + 5,
+          stroke: "#d97706", "stroke-width": 0.75, "stroke-dasharray": "2,2",
+        }));
+        // Diamond shape via polygon
+        const d = 5;
+        g.appendChild(_svgEl("polygon", {
+          points: `${x1},${noteY} ${x1+d},${noteY+d} ${x1},${noteY+d*2} ${x1-d},${noteY+d}`,
+          fill: "#fbbf24", stroke: "#d97706", "stroke-width": 1,
+        }));
+      }
+
+      // Tooltip
+      const tip = _svgEl("title", {});
+      tip.textContent = note.text;
+      g.appendChild(tip);
+
+      notesG.appendChild(g);
+    });
+
+    // Update playhead to current time
+    if (window.__vds) updateTimelinePlayhead(window.__vds.currentTime);
+  }
+
+  function updateTimelinePlayhead(currentTime) {
+    const duration = _tlDuration();
+    const width = _tlWidth();
+    const ph = document.getElementById("tl-playhead");
+    if (!ph || !duration) return;
+    const x = _tToX(currentTime, duration, width);
+    ph.setAttribute("x1", x);
+    ph.setAttribute("x2", x);
+  }
+
+  function attachTimelineHandlers() {
+    const container = document.getElementById("timeline-container");
+    if (!container) return;
+
+    // Click to seek
+    container.addEventListener("click", (e) => {
+      const rect = container.getBoundingClientRect();
+      const frac = (e.clientX - rect.left) / rect.width;
+      seekTo(Math.max(0, Math.min(1, frac)) * (_tlDuration() || 0));
+    });
+
+    // Re-render when container is resized
+    new ResizeObserver(() => renderTimeline()).observe(container);
+  }
+
   // ---------------------------------------------------------------------------
   // Init
   // ---------------------------------------------------------------------------
@@ -791,12 +1011,13 @@
     attachTranscriptHandlers();
     attachHotkeyHandlers();
     attachResizers();
-    renderSectionsNav();
-    const tryChapters = () => {
-      if (window.__vds) rebuildChaptersTrack();
-      else setTimeout(tryChapters, 200);
+
+    attachTimelineHandlers();
+    const tryInit = () => {
+      if (window.__vds && window.__vds.duration) renderTimeline();
+      else setTimeout(tryInit, 200);
     };
-    tryChapters();
+    tryInit();
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
