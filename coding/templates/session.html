@@ -1,74 +1,166 @@
 {% extends "base.html" %}
 {% block title %}{{ pid }}{% endblock %}
-{% block content %}
-<a href="/" class="text-sm text-blue-600">← Participants</a>
-<h1 class="text-2xl font-bold mb-4">{{ pid }}</h1>
+{% block body_class %}overflow-hidden{% endblock %}
 
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-  <!-- Video player -->
-  <div class="md:col-span-2">
-    <div id="player-target" class="rounded-md overflow-hidden bg-black"></div>
+{% block body %}
+<!-- Full-viewport column: header + main area -->
+<div style="display:flex; flex-direction:column; height:100vh; width:100vw; overflow:hidden;">
 
-    <script type="module">
-      import {
-        VidstackPlayer,
-        VidstackPlayerLayout,
-      } from "https://cdn.vidstack.io/player";
-
-      async function initPlayer() {
-        const player = await VidstackPlayer.create({
-          target: "#player-target",
-          title: {{ pid|tojson }},
-          src: {{ ("/video/" + pid)|tojson }},
-          layout: new VidstackPlayerLayout({}),
-        });
-        window.__vds = player;
-      }
-
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", initPlayer);
-      } else {
-        initPlayer();
-      }
-    </script>
+  <!-- Header bar -->
+  <div style="flex:0 0 auto; padding:8px 16px; border-bottom:1px solid #e5e7eb; background:#f9fafb; display:flex; align-items:center; gap:12px;">
+    <a href="/" style="font-size:0.85rem; color:#2563eb;">← Participants</a>
+    <span style="font-weight:600;">{{ pid }}</span>
   </div>
 
-  <!-- Transcript -->
-  <div class="md:col-span-1">
-    <div class="bg-white rounded-md shadow">
-      <div class="px-4 py-3 border-b font-semibold">Transcript</div>
-      <div class="max-h-[70vh] overflow-y-auto">
-        <table class="min-w-full text-sm">
-          <thead class="sticky top-0 bg-white">
-            <tr>
-              <th class="text-left px-4 py-2 w-20">Time</th>
-              <th class="text-left px-4 py-2 w-24">Speaker</th>
-              <th class="text-left px-4 py-2">Text</th>
+  <!-- Main area: left column (video + tools) | resizer | transcript -->
+  <div id="main-area" style="flex:1 1 0; display:flex; min-height:0; overflow:hidden;">
+
+    <!-- Left column: video + vertical resizer + tools pane -->
+    <div id="left-col" style="display:flex; flex-direction:column; min-width:0; overflow:hidden; flex:0 0 75%;">
+
+      <!-- Video -->
+      <div id="video-pane" style="flex:1 1 0; min-height:0; background:#000; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+        <div id="player-target" style="aspect-ratio:16/9; max-width:100%; max-height:100%; width:auto; height:auto;"></div>
+      </div>
+
+      <!-- Horizontal resize handle (between video and tools) -->
+      <div id="hresize"
+           style="flex:0 0 5px; background:#e5e7eb; cursor:row-resize; user-select:none;"
+           title="Drag to resize"></div>
+
+      <!-- Tools pane -->
+      <div id="tools-pane" style="flex:0 0 120px; min-height:40px; overflow:auto; padding:12px 16px; background:#f3f4f6; border-top:1px solid #e5e7eb;">
+        <em style="color:#6b7280;">More tools go here eventually</em>
+      </div>
+
+    </div>
+
+    <!-- Vertical resize handle (between left col and transcript) -->
+    <div id="vresize"
+         style="flex:0 0 5px; background:#e5e7eb; cursor:col-resize; user-select:none;"
+         title="Drag to resize"></div>
+
+    <!-- Transcript panel -->
+    <div id="transcript-col" style="flex:0 0 25%; display:flex; flex-direction:column; min-width:0; overflow:hidden; background:#fff; border-left:1px solid #e5e7eb;">
+      <div style="flex:0 0 auto; padding:10px 16px; border-bottom:1px solid #e5e7eb; font-weight:600; font-size:0.9rem;">Transcript</div>
+      <div id="transcript-scroll" style="flex:1 1 0; overflow-y:auto; overflow-x:hidden;">
+        <table style="width:100%; table-layout:fixed; border-collapse:collapse; font-size:0.85rem;">
+          <colgroup>
+            <col style="width:60px;">
+            <col style="width:90px;">
+            <col><!-- Text column takes remaining space -->
+          </colgroup>
+          <thead style="position:sticky; top:0; background:#fff; z-index:1;">
+            <tr style="border-bottom:1px solid #e5e7eb;">
+              <th style="text-align:left; padding:6px 8px; white-space:nowrap;">Time</th>
+              <th style="text-align:left; padding:6px 8px; white-space:nowrap;">Speaker</th>
+              <th style="text-align:left; padding:6px 8px;">Text</th>
             </tr>
           </thead>
           <tbody>
             {% for utt in utterances %}
             <tr
-              class="hover:bg-gray-50 cursor-pointer border-t border-gray-100"
+              style="cursor:pointer; border-top:1px solid #f3f4f6;"
               data-start="{{ utt.start_seconds }}"
             >
-              <td class="px-4 py-2 text-gray-500 whitespace-nowrap">{{ utt.start_ts }}</td>
-              <td class="px-4 py-2 font-medium whitespace-nowrap">{{ utt.speaker }}</td>
-              <td class="px-4 py-2">{{ utt.text }}</td>
+              <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; overflow:hidden;">{{ utt.start_ts }}</td>
+              <td style="padding:5px 8px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ utt.speaker }}</td>
+              <td style="padding:5px 8px; word-break:break-word;">{{ utt.text }}</td>
             </tr>
             {% else %}
             <tr>
-              <td class="px-4 py-3 text-gray-500" colspan="3">No transcript available.</td>
+              <td style="padding:10px 8px; color:#6b7280;" colspan="3">No transcript available.</td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
-  </div>
-</div>
+
+  </div><!-- /main-area -->
+</div><!-- /outer column -->
+
+<!-- Vidstack (module script) -->
+<script type="module">
+  import {
+    VidstackPlayer,
+    VidstackPlayerLayout,
+  } from "https://cdn.vidstack.io/player";
+
+  async function initPlayer() {
+    const player = await VidstackPlayer.create({
+      target: "#player-target",
+      title: {{ pid|tojson }},
+      src: {{ ("/video/" + pid)|tojson }},
+      layout: new VidstackPlayerLayout({}),
+    });
+    window.__vds = player;
+
+    player.addEventListener("time-update", () => {
+      syncTranscript(player.currentTime);
+    });
+
+    for (const evname of ["loaded-metadata", "can-play", "can-play-through", "loaded-data", "stream-type-change", "media-type-change"]) {
+      player.addEventListener(evname, () => {
+        if (window.__videoAspect) return;
+        const mw = player.$state.mediaWidth();
+        const mh = player.$state.mediaHeight();
+        if (mw && mh) {
+          window.__videoAspect = mw / mh;
+        } else {
+          const videoEl = document.querySelector("#player-target video");
+          if (videoEl?.videoWidth && videoEl?.videoHeight) {
+            window.__videoAspect = videoEl.videoWidth / videoEl.videoHeight;
+          }
+        }
+        if (window.__videoAspect) applyDefaultVideoSize(window.__videoAspect);
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initPlayer);
+  } else {
+    initPlayer();
+  }
+</script>
 
 <script>
+  // ---------------------------------------------------------------------------
+  // Transcript sync
+  // ---------------------------------------------------------------------------
+  let _transcriptRows = null;
+  function getTranscriptRows() {
+    if (_transcriptRows) return _transcriptRows;
+    _transcriptRows = Array.from(
+      document.querySelectorAll("tbody tr[data-start]")
+    ).map((row) => ({ seconds: parseFloat(row.getAttribute("data-start")), row }));
+    return _transcriptRows;
+  }
+
+  let _activeRow = null;
+  function syncTranscript(currentTime) {
+    const rows = getTranscriptRows();
+    if (!rows.length) return;
+    let active = rows[0].row;
+    for (const { seconds, row } of rows) {
+      if (seconds <= currentTime) active = row;
+      else break;
+    }
+    if (active === _activeRow) return;
+    if (_activeRow) _activeRow.style.background = "";
+    active.style.background = "#eff6ff";
+    _activeRow = active;
+    const scroller = document.getElementById("transcript-scroll");
+    const rowTop = active.offsetTop;
+    const rowH = active.offsetHeight;
+    const target = rowTop - (scroller.clientHeight / 2) + (rowH / 2);
+    scroller.scrollTo({ top: target, behavior: "smooth" });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Transcript click-to-seek
+  // ---------------------------------------------------------------------------
   function attachTranscriptHandlers() {
     document.querySelectorAll("tbody tr[data-start]").forEach((row) => {
       row.addEventListener("click", () => {
@@ -76,16 +168,161 @@
         const start = parseFloat(row.getAttribute("data-start"));
         if (Number.isFinite(start) && player) {
           player.currentTime = start;
+          player.controls.show();
+          syncTranscript(start);
           player.play();
         }
       });
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Hotkeys
+  // ---------------------------------------------------------------------------
+  function attachHotkeyHandlers() {
+    document.addEventListener("keydown", (e) => {
+      const player = window.__vds;
+      if (!player) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        player.paused ? player.play() : player.pause();
+      } else if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        player.currentTime = Math.max(0, player.currentTime - (e.ctrlKey ? 30 : 5));
+        player.controls.show();
+        syncTranscript(player.currentTime);
+      } else if (e.code === "ArrowRight") {
+        e.preventDefault();
+        player.currentTime = player.currentTime + (e.ctrlKey ? 30 : 5);
+        player.controls.show();
+        syncTranscript(player.currentTime);
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Default video sizing + draggable resizers
+  // ---------------------------------------------------------------------------
+
+  // Set left-col width and video-pane height so the video fills without letterbox,
+  // capped at 75% of total width. Called once after loaded-metadata.
+  function applyDefaultVideoSize(aspect) {
+    const mainArea = document.getElementById("main-area");
+    const leftCol  = document.getElementById("left-col");
+    const transcriptCol = document.getElementById("transcript-col");
+    const videoPane = document.getElementById("video-pane");
+    const toolsPane = document.getElementById("tools-pane");
+
+    const totalW = mainArea.getBoundingClientRect().width;
+    const totalH = mainArea.getBoundingClientRect().height;
+    const toolsH = toolsPane.getBoundingClientRect().height;
+    const hresizeH = document.getElementById("hresize").getBoundingClientRect().height;
+    const availH = totalH - toolsH - hresizeH;
+    const maxW = totalW * 0.75;
+
+    const wFromH = availH * aspect;
+    const hFromW = maxW / aspect;
+
+    let videoW, videoH;
+    if (wFromH <= maxW) {
+      videoH = availH;
+      videoW = wFromH;
+    } else {
+      videoW = maxW;
+      videoH = hFromW;
+    }
+
+    const leftFrac = videoW / totalW;
+    leftCol.style.flex = `0 0 ${leftFrac * 100}%`;
+    transcriptCol.style.flex = `0 0 ${(1 - leftFrac) * 100}%`;
+    videoPane.style.flex = `0 0 ${videoH}px`;
+  }
+
+  function attachResizers() {
+    const mainArea = document.getElementById("main-area");
+    const leftCol  = document.getElementById("left-col");
+    const transcriptCol = document.getElementById("transcript-col");
+    const videoPane = document.getElementById("video-pane");
+    const toolsPane = document.getElementById("tools-pane");
+
+    // Vertical resizer: left col width vs transcript width
+    const vresize = document.getElementById("vresize");
+    vresize.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const totalW = mainArea.getBoundingClientRect().width;
+      const startLeftFrac = leftCol.getBoundingClientRect().width / totalW;
+
+      function onMove(ev) {
+        const dx = ev.clientX - startX;
+        let newFrac = startLeftFrac + dx / totalW;
+        newFrac = Math.max(0.2, Math.min(0.85, newFrac));
+        leftCol.style.flex = `0 0 ${newFrac * 100}%`;
+        transcriptCol.style.flex = `0 0 ${(1 - newFrac) * 100}%`;
+      }
+      function onUp() {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      }
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+
+    // Double-click vresize: shrink left-col width to eliminate horizontal letterbox
+    vresize.addEventListener("dblclick", () => {
+      const aspect = window.__videoAspect;
+      if (!aspect) return;
+      const videoH = videoPane.getBoundingClientRect().height;
+      const totalW = mainArea.getBoundingClientRect().width;
+      const idealW = Math.min(videoH * aspect, totalW * 0.85);
+      const frac = Math.max(0.2, idealW / totalW);
+      leftCol.style.flex = `0 0 ${frac * 100}%`;
+      transcriptCol.style.flex = `0 0 ${(1 - frac) * 100}%`;
+    });
+
+    // Horizontal resizer: video height vs tools height
+    const hresize = document.getElementById("hresize");
+    hresize.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startVideoH = videoPane.getBoundingClientRect().height;
+
+      function onMove(ev) {
+        const dy = ev.clientY - startY;
+        const newVideoH = Math.max(80, startVideoH + dy);
+        videoPane.style.flex = `0 0 ${newVideoH}px`;
+      }
+      function onUp() {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      }
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+
+    // Double-click hresize: shrink video-pane height to eliminate vertical letterbox
+    hresize.addEventListener("dblclick", () => {
+      const aspect = window.__videoAspect;
+      if (!aspect) return;
+      const leftW = leftCol.getBoundingClientRect().width;
+      const idealH = Math.max(80, leftW / aspect);
+      videoPane.style.flex = `0 0 ${idealH}px`;
+    });
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", attachTranscriptHandlers);
+    document.addEventListener("DOMContentLoaded", () => {
+      attachTranscriptHandlers();
+      attachHotkeyHandlers();
+      attachResizers();
+    });
   } else {
     attachTranscriptHandlers();
+    attachHotkeyHandlers();
+    attachResizers();
   }
 </script>
 {% endblock %}
