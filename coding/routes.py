@@ -258,6 +258,17 @@ def add_note(pid: str):
     return jsonify(note)
 
 
+@bp.patch("/api/notes/<int:note_id>")
+def update_note(note_id: int):
+    payload = request.get_json(silent=True) or {}
+    text = payload.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "text required"}), 400
+    db = get_db()
+    db["notes"].update(note_id, {"text": text})
+    return jsonify({"text": text})
+
+
 @bp.delete("/api/notes/<int:note_id>")
 def delete_note(note_id: int):
     db = get_db()

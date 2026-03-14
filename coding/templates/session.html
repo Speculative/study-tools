@@ -74,7 +74,7 @@
                     {% if row.type == "note_start" %}▶ note{% elif row.type == "note_end" %}◀ note{% else %}♪ note{% endif %}
                   </td>
                   <td style="padding:5px 8px; word-break:break-word; color:#78350f;">
-                    <span class="note-text">{{ row.text }}</span>
+                    <span class="note-text" title="Click to edit" style="cursor:text;">{{ row.text }}</span>
                     <button class="note-delete-btn" data-note-id="{{ row.id }}"
                             style="float:right; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer; padding:0 2px; line-height:1;">✕</button>
                   </td>
@@ -234,6 +234,13 @@
       if (noteDelBtn) {
         e.stopPropagation();
         deleteNote(parseInt(noteDelBtn.getAttribute("data-note-id")));
+        return;
+      }
+
+      const noteText = e.target.closest(".note-text");
+      if (noteText) {
+        e.stopPropagation();
+        startNoteEdit(noteText);
         return;
       }
 
@@ -605,7 +612,7 @@
       <td style="padding:5px 8px; color:#92400e; white-space:nowrap; overflow:hidden; font-size:0.8rem;">${timeLabel}</td>
       <td style="padding:5px 8px; color:#92400e; font-size:0.75rem; white-space:nowrap;">${typeLabel}</td>
       <td style="padding:5px 8px; word-break:break-word; color:#78350f;">
-        <span class="note-text">${escHtml(note.text)}</span>
+        <span class="note-text" title="Click to edit" style="cursor:text;">${escHtml(note.text)}</span>
         <button class="note-delete-btn" data-note-id="${note.id}"
                 style="float:right; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer; padding:0 2px; line-height:1;">✕</button>
       </td>`;
@@ -615,6 +622,37 @@
   async function deleteNote(noteId) {
     await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
     document.querySelectorAll(`.note-row[data-note-id="${noteId}"]`).forEach(r => r.remove());
+  }
+
+  function startNoteEdit(span) {
+    if (span.querySelector("input")) return;  // already editing
+    const current = span.textContent;
+    span.innerHTML = `<input type="text" value="${escHtml(current)}"
+      style="width:100%; font-size:0.85rem; padding:1px 3px; border:1px solid #fbbf24; border-radius:3px; background:#fff; color:#78350f;" />`;
+    const input = span.querySelector("input");
+    input.focus();
+    input.select();
+
+    async function commit() {
+      const text = input.value.trim();
+      if (!text || text === current) { span.textContent = current; return; }
+      const noteId = span.closest("tr.note-row").getAttribute("data-note-id");
+      const res = await fetch(`/api/notes/${noteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) { span.textContent = current; return; }
+      // Update all rows sharing this note id (note_start + note_end both show text)
+      document.querySelectorAll(`.note-row[data-note-id="${noteId}"] .note-text`)
+        .forEach(s => s.textContent = text);
+    }
+
+    input.addEventListener("keydown", async (e) => {
+      if (e.key === "Enter") { e.preventDefault(); await commit(); }
+      if (e.key === "Escape") { span.textContent = current; }
+    });
+    input.addEventListener("blur", commit);
   }
 
   // ---------------------------------------------------------------------------
