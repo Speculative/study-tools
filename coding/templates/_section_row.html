@@ -1,0 +1,13 @@
+<tr class="section-header"
+    data-section-id="{{ sec.id }}"
+    data-section-start="{{ sec.start_seconds }}"
+    style="background:#f0f4ff; cursor:pointer; border-top:2px solid #c7d2fe;">
+  <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; font-size:0.8rem;">{{ sec.start_ts }}</td>
+  <td colspan="2" style="padding:5px 8px; font-weight:600; color:#3730a3;">
+    <span class="section-toggle" style="margin-right:4px; font-size:0.75rem;">▼</span>{{ sec.name }}
+    <button class="section-delete-btn"
+            data-section-id="{{ sec.id }}"
+            style="float:right; font-size:0.75rem; color:#9ca3af; background:none; border:none; cursor:pointer; padding:0 4px;"
+            title="Delete section">✕</button>
+  </td>
+</tr>

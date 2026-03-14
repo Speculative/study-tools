@@ -3,7 +3,6 @@
 {% block body_class %}overflow-hidden{% endblock %}
 
 {% block body %}
-<!-- Full-viewport column: header + main area -->
 <div style="display:flex; flex-direction:column; height:100vh; width:100vw; overflow:hidden;">
 
   <!-- Header bar -->
@@ -12,33 +11,29 @@
     <span style="font-weight:600;">{{ pid }}</span>
   </div>
 
-  <!-- Main area: left column (video + tools) | resizer | transcript -->
+  <!-- Main area -->
   <div id="main-area" style="flex:1 1 0; display:flex; min-height:0; overflow:hidden;">
 
-    <!-- Left column: video + vertical resizer + tools pane -->
+    <!-- Left column: video + hresize + tools -->
     <div id="left-col" style="display:flex; flex-direction:column; min-width:0; overflow:hidden; flex:0 0 75%;">
 
-      <!-- Video -->
       <div id="video-pane" style="flex:1 1 0; min-height:0; background:#000; overflow:hidden; display:flex; align-items:center; justify-content:center;">
         <div id="player-target" style="aspect-ratio:16/9; max-width:100%; max-height:100%; width:auto; height:auto;"></div>
       </div>
 
-      <!-- Horizontal resize handle (between video and tools) -->
-      <div id="hresize"
-           style="flex:0 0 5px; background:#e5e7eb; cursor:row-resize; user-select:none;"
-           title="Drag to resize"></div>
+      <div id="hresize" style="flex:0 0 5px; background:#e5e7eb; cursor:row-resize; user-select:none;" title="Drag to resize · Double-click to fit"></div>
 
-      <!-- Tools pane -->
-      <div id="tools-pane" style="flex:0 0 120px; min-height:40px; overflow:auto; padding:12px 16px; background:#f3f4f6; border-top:1px solid #e5e7eb;">
-        <em style="color:#6b7280;">More tools go here eventually</em>
+      <div id="tools-pane" style="flex:0 0 120px; min-height:40px; overflow:auto; background:#f3f4f6; border-top:1px solid #e5e7eb;">
+        <!-- Sections nav -->
+        <div id="sections-nav" style="padding:8px 12px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+          <span style="font-size:0.75rem; color:#6b7280; white-space:nowrap;">Sections:</span>
+          <span id="sections-nav-empty" style="font-size:0.75rem; color:#9ca3af; font-style:italic;">none yet — press S to add</span>
+        </div>
       </div>
 
     </div>
 
-    <!-- Vertical resize handle (between left col and transcript) -->
-    <div id="vresize"
-         style="flex:0 0 5px; background:#e5e7eb; cursor:col-resize; user-select:none;"
-         title="Drag to resize"></div>
+    <div id="vresize" style="flex:0 0 5px; background:#e5e7eb; cursor:col-resize; user-select:none;" title="Drag to resize · Double-click to fit"></div>
 
     <!-- Transcript panel -->
     <div id="transcript-col" style="flex:0 0 25%; display:flex; flex-direction:column; min-width:0; overflow:hidden; background:#fff; border-left:1px solid #e5e7eb;">
@@ -48,7 +43,7 @@
           <colgroup>
             <col style="width:60px;">
             <col style="width:90px;">
-            <col><!-- Text column takes remaining space -->
+            <col>
           </colgroup>
           <thead style="position:sticky; top:0; background:#fff; z-index:1;">
             <tr style="border-bottom:1px solid #e5e7eb;">
@@ -57,30 +52,31 @@
               <th style="text-align:left; padding:6px 8px;">Text</th>
             </tr>
           </thead>
-          <tbody>
-            {% for utt in utterances %}
-            <tr
-              style="cursor:pointer; border-top:1px solid #f3f4f6;"
-              data-start="{{ utt.start_seconds }}"
-            >
-              <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; overflow:hidden;">{{ utt.start_ts }}</td>
-              <td style="padding:5px 8px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ utt.speaker }}</td>
-              <td style="padding:5px 8px; word-break:break-word;">{{ utt.text }}</td>
-            </tr>
+          <tbody id="transcript-body">
+            {% for row in rows %}
+              {% if row.type == "section" %}
+                {% with sec = row %}{% include "_section_row.html" %}{% endwith %}
+              {% else %}
+                <tr data-start="{{ row.start_seconds }}"
+                    data-section-id="{{ row.section_id or '' }}"
+                    style="cursor:pointer; border-top:1px solid #f3f4f6;">
+                  <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; overflow:hidden;">{{ row.start_ts }}</td>
+                  <td style="padding:5px 8px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ row.speaker }}</td>
+                  <td style="padding:5px 8px; word-break:break-word;">{{ row.text }}</td>
+                </tr>
+              {% endif %}
             {% else %}
-            <tr>
-              <td style="padding:10px 8px; color:#6b7280;" colspan="3">No transcript available.</td>
-            </tr>
+              <tr><td style="padding:10px 8px; color:#6b7280;" colspan="3">No transcript available.</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
 
-  </div><!-- /main-area -->
-</div><!-- /outer column -->
+  </div>
+</div>
 
-<!-- Vidstack (module script) -->
+<!-- Vidstack -->
 <script type="module">
   import {
     VidstackPlayer,
@@ -109,9 +105,8 @@
           window.__videoAspect = mw / mh;
         } else {
           const videoEl = document.querySelector("#player-target video");
-          if (videoEl?.videoWidth && videoEl?.videoHeight) {
+          if (videoEl?.videoWidth && videoEl?.videoHeight)
             window.__videoAspect = videoEl.videoWidth / videoEl.videoHeight;
-          }
         }
         if (window.__videoAspect) applyDefaultVideoSize(window.__videoAspect);
       });
@@ -126,22 +121,68 @@
 </script>
 
 <script>
+  const PID = {{ pid|tojson }};
+
+  // ---------------------------------------------------------------------------
+  // Section collapse — keyed by section DB id (string)
+  // ---------------------------------------------------------------------------
+  const _collapsed = new Set();
+
+  function setSectionCollapsed(secId, collapsed) {
+    if (collapsed) _collapsed.add(secId); else _collapsed.delete(secId);
+    const header = document.querySelector(`.section-header[data-section-id="${secId}"]`);
+    if (header) header.querySelector(".section-toggle").textContent = collapsed ? "▶" : "▼";
+    document.querySelectorAll(`tr[data-section-id="${secId}"][data-start]`).forEach(row => {
+      row.style.display = collapsed ? "none" : "";
+    });
+  }
+
+  function ensureSectionExpanded(secId) {
+    if (secId && _collapsed.has(secId)) setSectionCollapsed(secId, false);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Seek-bar chapters
+  // ---------------------------------------------------------------------------
+  let _sections = {{ sections|tojson }};
+
+  function toVttTime(s) {
+    const h = Math.floor(s / 3600).toString().padStart(2, "0");
+    const m = Math.floor((s % 3600) / 60).toString().padStart(2, "0");
+    const sec = (s % 60).toString().padStart(2, "0");
+    return `${h}:${m}:${sec}.000`;
+  }
+
+  function rebuildChaptersTrack() {
+    document.querySelectorAll("#player-target track[kind='chapters']").forEach(t => t.remove());
+    if (!_sections.length) return;
+    const videoEl = document.querySelector("#player-target video");
+    if (!videoEl) return;
+
+    let vtt = "WEBVTT\n\n";
+    _sections.forEach((sec, i) => {
+      const end = _sections[i + 1] ? _sections[i + 1].start_seconds : 999999;
+      vtt += `${toVttTime(sec.start_seconds)} --> ${toVttTime(end)}\n${sec.name}\n\n`;
+    });
+
+    const url = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
+    const track = document.createElement("track");
+    track.kind = "chapters";
+    track.src = url;
+    track.default = true;
+    videoEl.appendChild(track);
+  }
+
   // ---------------------------------------------------------------------------
   // Transcript sync
   // ---------------------------------------------------------------------------
-  let _transcriptRows = null;
-  function getTranscriptRows() {
-    if (_transcriptRows) return _transcriptRows;
-    _transcriptRows = Array.from(
-      document.querySelectorAll("tbody tr[data-start]")
-    ).map((row) => ({ seconds: parseFloat(row.getAttribute("data-start")), row }));
-    return _transcriptRows;
-  }
-
   let _activeRow = null;
+
   function syncTranscript(currentTime) {
-    const rows = getTranscriptRows();
+    const rows = Array.from(document.querySelectorAll("#transcript-body tr[data-start]"))
+      .map(r => ({ seconds: parseFloat(r.getAttribute("data-start")), row: r }));
     if (!rows.length) return;
+
     let active = rows[0].row;
     for (const { seconds, row } of rows) {
       if (seconds <= currentTime) active = row;
@@ -151,19 +192,37 @@
     if (_activeRow) _activeRow.style.background = "";
     active.style.background = "#eff6ff";
     _activeRow = active;
+
+    ensureSectionExpanded(active.getAttribute("data-section-id"));
+
     const scroller = document.getElementById("transcript-scroll");
-    const rowTop = active.offsetTop;
-    const rowH = active.offsetHeight;
-    const target = rowTop - (scroller.clientHeight / 2) + (rowH / 2);
-    scroller.scrollTo({ top: target, behavior: "smooth" });
+    scroller.scrollTo({
+      top: active.offsetTop - (scroller.clientHeight / 2) + (active.offsetHeight / 2),
+      behavior: "smooth",
+    });
   }
 
   // ---------------------------------------------------------------------------
-  // Transcript click-to-seek
+  // Transcript body: click delegation for seek, collapse, delete
   // ---------------------------------------------------------------------------
   function attachTranscriptHandlers() {
-    document.querySelectorAll("tbody tr[data-start]").forEach((row) => {
-      row.addEventListener("click", () => {
+    document.getElementById("transcript-body").addEventListener("click", (e) => {
+      const delBtn = e.target.closest(".section-delete-btn");
+      if (delBtn) {
+        e.stopPropagation();
+        deleteSection(parseInt(delBtn.getAttribute("data-section-id")));
+        return;
+      }
+
+      const header = e.target.closest(".section-header");
+      if (header) {
+        const secId = header.getAttribute("data-section-id");
+        setSectionCollapsed(secId, !_collapsed.has(secId));
+        return;
+      }
+
+      const row = e.target.closest("tr[data-start]");
+      if (row) {
         const player = window.__vds;
         const start = parseFloat(row.getAttribute("data-start"));
         if (Number.isFinite(start) && player) {
@@ -172,7 +231,198 @@
           syncTranscript(start);
           player.play();
         }
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Add section — inline input, htmx POST for persistence
+  // ---------------------------------------------------------------------------
+  let _sectionInputActive = false;
+  let _allSectionNames = [];
+
+  async function loadSectionNames() {
+    const res = await fetch("/api/sections/names");
+    _allSectionNames = await res.json();
+  }
+
+  function insertSectionInput(atSeconds) {
+    if (_sectionInputActive) return;
+    _sectionInputActive = true;
+    loadSectionNames();
+
+    const tbody = document.getElementById("transcript-body");
+    // Find insertion point
+    const allRows = Array.from(tbody.querySelectorAll(
+      "tr[data-start], tr.section-header[data-section-start]"
+    ));
+    let insertAfter = null;
+    for (const row of allRows) {
+      const t = parseFloat(row.getAttribute("data-start") ?? row.getAttribute("data-section-start") ?? "0");
+      if (t <= atSeconds) insertAfter = row;
+      else break;
+    }
+
+    const inputRow = document.createElement("tr");
+    inputRow.id = "section-input-row";
+    inputRow.style.cssText = "background:#fefce8; border-top:2px solid #fbbf24;";
+    inputRow.innerHTML = `
+      <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; font-size:0.8rem;">${secondsToTs(atSeconds)}</td>
+      <td colspan="2" style="padding:4px 8px;">
+        <div style="position:relative; display:flex; align-items:center;">
+          <span id="section-input-ghost" style="position:absolute; left:0; top:0; padding:2px 4px; font-size:0.85rem; pointer-events:none; white-space:pre; z-index:0;"></span>
+          <input id="section-input-field" type="text" placeholder="Section name…"
+                 style="width:100%; font-size:0.85rem; padding:2px 4px; border:1px solid #fbbf24; border-radius:3px; background:transparent; position:relative; z-index:1;" />
+        </div>
+      </td>`;
+
+    if (insertAfter) insertAfter.after(inputRow);
+    else tbody.prepend(inputRow);
+
+    const input = document.getElementById("section-input-field");
+    const ghost = document.getElementById("section-input-ghost");
+    input.focus();
+
+    let _suggestion = null;
+
+    function updateGhost() {
+      const typed = input.value;
+      _suggestion = null;
+      if (!typed) { ghost.innerHTML = ""; return; }
+      const lower = typed.toLowerCase();
+      const match = _allSectionNames.find(n => n.toLowerCase().startsWith(lower) && n.toLowerCase() !== lower);
+      if (match) {
+        _suggestion = match;
+        ghost.innerHTML =
+          `<span style="color:transparent">${escHtml(typed)}</span>` +
+          `<span style="color:#9ca3af">${escHtml(match.slice(typed.length))}</span>`;
+      } else {
+        ghost.innerHTML = "";
+      }
+    }
+
+    input.addEventListener("input", updateGhost);
+
+    input.addEventListener("keydown", async (e) => {
+      if (e.key === "Tab" && _suggestion) {
+        e.preventDefault();
+        input.value = input.value + _suggestion.slice(input.value.length);
+        updateGhost();
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const typed = input.value.trim();
+        if (!typed) { cancelSectionInput(); return; }
+        // Use canonical casing if there's an exact case-insensitive match
+        const canonical = _allSectionNames.find(n => n.toLowerCase() === typed.toLowerCase());
+        const name = canonical ?? typed;
+        await confirmSection(name, atSeconds);
+        return;
+      }
+      if (e.key === "Escape") cancelSectionInput();
+    });
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function cancelSectionInput() {
+    document.getElementById("section-input-row")?.remove();
+    _sectionInputActive = false;
+  }
+
+  async function confirmSection(name, startSeconds) {
+    const res = await fetch(`/api/sessions/${PID}/sections`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "HX-Request": "true",
+      },
+      body: JSON.stringify({ name, start_seconds: startSeconds }),
+    });
+    if (!res.ok) { cancelSectionInput(); return; }
+
+    const html = await res.text();
+    const inputRow = document.getElementById("section-input-row");
+
+    // Parse returned HTML fragment into a real element
+    const tmp = document.createElement("tbody");
+    tmp.innerHTML = html.trim();
+    const newRow = tmp.firstElementChild;
+
+    // Replace the input row with the confirmed section row
+    inputRow.replaceWith(newRow);
+    _sectionInputActive = false;
+
+    // Update _sections for chapter track
+    const sec = {
+      id: parseInt(newRow.getAttribute("data-section-id")),
+      start_seconds: parseInt(newRow.getAttribute("data-section-start")),
+      name,
+    };
+    _sections.push(sec);
+    _sections.sort((a, b) => a.start_seconds - b.start_seconds);
+
+    // Assign section id to utterances that now belong to this section
+    rebuildUtteranceSectionIds();
+    rebuildChaptersTrack();
+    renderSectionsNav();
+  }
+
+  async function deleteSection(secId) {
+    await fetch(`/api/sections/${secId}`, { method: "DELETE" });
+    document.querySelector(`.section-header[data-section-id="${secId}"]`)?.remove();
+    _collapsed.delete(String(secId));
+    _sections = _sections.filter(s => s.id !== secId);
+    rebuildUtteranceSectionIds();
+    rebuildChaptersTrack();
+    renderSectionsNav();
+  }
+
+  // Walk the DOM in order, propagate current section-id to utterance rows.
+  // Called after any add/delete.
+  function rebuildUtteranceSectionIds() {
+    let curSecId = "";
+    for (const row of document.querySelectorAll("#transcript-body tr")) {
+      if (row.classList.contains("section-header")) {
+        curSecId = row.getAttribute("data-section-id");
+      } else if (row.hasAttribute("data-start")) {
+        row.setAttribute("data-section-id", curSecId);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sections nav (buttons below the video)
+  // ---------------------------------------------------------------------------
+  function renderSectionsNav() {
+    const nav = document.getElementById("sections-nav");
+    const empty = document.getElementById("sections-nav-empty");
+    // Remove existing buttons (keep the label and empty notice)
+    nav.querySelectorAll("button.section-nav-btn").forEach(b => b.remove());
+
+    if (_sections.length === 0) {
+      empty.style.display = "";
+      return;
+    }
+    empty.style.display = "none";
+
+    _sections.forEach(sec => {
+      const btn = document.createElement("button");
+      btn.className = "section-nav-btn";
+      btn.textContent = sec.name;
+      btn.title = secondsToTs(sec.start_seconds);
+      btn.style.cssText = "font-size:0.75rem; padding:2px 8px; border-radius:9999px; border:1px solid #c7d2fe; background:#e0e7ff; color:#3730a3; cursor:pointer; white-space:nowrap;";
+      btn.addEventListener("click", () => {
+        const player = window.__vds;
+        if (!player) return;
+        player.currentTime = sec.start_seconds;
+        player.controls.show();
+        syncTranscript(sec.start_seconds);
       });
+      nav.appendChild(btn);
     });
   }
 
@@ -181,10 +431,11 @@
   // ---------------------------------------------------------------------------
   function attachHotkeyHandlers() {
     document.addEventListener("keydown", (e) => {
-      const player = window.__vds;
-      if (!player) return;
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      const player = window.__vds;
+      if (!player) return;
 
       if (e.code === "Space") {
         e.preventDefault();
@@ -199,16 +450,16 @@
         player.currentTime = player.currentTime + (e.ctrlKey ? 30 : 5);
         player.controls.show();
         syncTranscript(player.currentTime);
+      } else if (e.code === "KeyS") {
+        e.preventDefault();
+        insertSectionInput(Math.floor(player.currentTime));
       }
     });
   }
 
   // ---------------------------------------------------------------------------
-  // Default video sizing + draggable resizers
+  // Default video size + resizers
   // ---------------------------------------------------------------------------
-
-  // Set left-col width and video-pane height so the video fills without letterbox,
-  // capped at 75% of total width. Called once after loaded-metadata.
   function applyDefaultVideoSize(aspect) {
     const mainArea = document.getElementById("main-area");
     const leftCol  = document.getElementById("left-col");
@@ -218,22 +469,15 @@
 
     const totalW = mainArea.getBoundingClientRect().width;
     const totalH = mainArea.getBoundingClientRect().height;
-    const toolsH = toolsPane.getBoundingClientRect().height;
-    const hresizeH = document.getElementById("hresize").getBoundingClientRect().height;
-    const availH = totalH - toolsH - hresizeH;
+    const availH = totalH - toolsPane.getBoundingClientRect().height
+                          - document.getElementById("hresize").getBoundingClientRect().height;
     const maxW = totalW * 0.75;
 
     const wFromH = availH * aspect;
     const hFromW = maxW / aspect;
-
     let videoW, videoH;
-    if (wFromH <= maxW) {
-      videoH = availH;
-      videoW = wFromH;
-    } else {
-      videoW = maxW;
-      videoH = hFromW;
-    }
+    if (wFromH <= maxW) { videoH = availH; videoW = wFromH; }
+    else { videoW = maxW; videoH = hFromW; }
 
     const leftFrac = videoW / totalW;
     leftCol.style.flex = `0 0 ${leftFrac * 100}%`;
@@ -246,83 +490,70 @@
     const leftCol  = document.getElementById("left-col");
     const transcriptCol = document.getElementById("transcript-col");
     const videoPane = document.getElementById("video-pane");
-    const toolsPane = document.getElementById("tools-pane");
 
-    // Vertical resizer: left col width vs transcript width
     const vresize = document.getElementById("vresize");
     vresize.addEventListener("mousedown", (e) => {
       e.preventDefault();
       const startX = e.clientX;
       const totalW = mainArea.getBoundingClientRect().width;
-      const startLeftFrac = leftCol.getBoundingClientRect().width / totalW;
-
+      const startFrac = leftCol.getBoundingClientRect().width / totalW;
       function onMove(ev) {
-        const dx = ev.clientX - startX;
-        let newFrac = startLeftFrac + dx / totalW;
-        newFrac = Math.max(0.2, Math.min(0.85, newFrac));
-        leftCol.style.flex = `0 0 ${newFrac * 100}%`;
-        transcriptCol.style.flex = `0 0 ${(1 - newFrac) * 100}%`;
+        let f = Math.max(0.2, Math.min(0.85, startFrac + (ev.clientX - startX) / totalW));
+        leftCol.style.flex = `0 0 ${f * 100}%`;
+        transcriptCol.style.flex = `0 0 ${(1 - f) * 100}%`;
       }
-      function onUp() {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      }
+      function onUp() { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); }
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
     });
-
-    // Double-click vresize: shrink left-col width to eliminate horizontal letterbox
     vresize.addEventListener("dblclick", () => {
-      const aspect = window.__videoAspect;
-      if (!aspect) return;
-      const videoH = videoPane.getBoundingClientRect().height;
+      const aspect = window.__videoAspect; if (!aspect) return;
       const totalW = mainArea.getBoundingClientRect().width;
-      const idealW = Math.min(videoH * aspect, totalW * 0.85);
-      const frac = Math.max(0.2, idealW / totalW);
-      leftCol.style.flex = `0 0 ${frac * 100}%`;
-      transcriptCol.style.flex = `0 0 ${(1 - frac) * 100}%`;
+      const f = Math.max(0.2, Math.min(videoPane.getBoundingClientRect().height * aspect, totalW * 0.85) / totalW);
+      leftCol.style.flex = `0 0 ${f * 100}%`;
+      transcriptCol.style.flex = `0 0 ${(1 - f) * 100}%`;
     });
 
-    // Horizontal resizer: video height vs tools height
     const hresize = document.getElementById("hresize");
     hresize.addEventListener("mousedown", (e) => {
       e.preventDefault();
       const startY = e.clientY;
-      const startVideoH = videoPane.getBoundingClientRect().height;
-
-      function onMove(ev) {
-        const dy = ev.clientY - startY;
-        const newVideoH = Math.max(80, startVideoH + dy);
-        videoPane.style.flex = `0 0 ${newVideoH}px`;
-      }
-      function onUp() {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      }
+      const startH = videoPane.getBoundingClientRect().height;
+      function onMove(ev) { videoPane.style.flex = `0 0 ${Math.max(80, startH + ev.clientY - startY)}px`; }
+      function onUp() { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); }
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
     });
-
-    // Double-click hresize: shrink video-pane height to eliminate vertical letterbox
     hresize.addEventListener("dblclick", () => {
-      const aspect = window.__videoAspect;
-      if (!aspect) return;
-      const leftW = leftCol.getBoundingClientRect().width;
-      const idealH = Math.max(80, leftW / aspect);
-      videoPane.style.flex = `0 0 ${idealH}px`;
+      const aspect = window.__videoAspect; if (!aspect) return;
+      videoPane.style.flex = `0 0 ${Math.max(80, leftCol.getBoundingClientRect().width / aspect)}px`;
     });
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => {
-      attachTranscriptHandlers();
-      attachHotkeyHandlers();
-      attachResizers();
-    });
-  } else {
+  // ---------------------------------------------------------------------------
+  // Utilities
+  // ---------------------------------------------------------------------------
+  function secondsToTs(s) {
+    return [Math.floor(s/3600), Math.floor((s%3600)/60), s%60]
+      .map(n => String(n).padStart(2,"0")).join(":");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Init
+  // ---------------------------------------------------------------------------
+  function init() {
     attachTranscriptHandlers();
     attachHotkeyHandlers();
     attachResizers();
+    renderSectionsNav();
+    const tryChapters = () => {
+      if (window.__vds) rebuildChaptersTrack();
+      else setTimeout(tryChapters, 200);
+    };
+    tryChapters();
   }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
 </script>
 {% endblock %}

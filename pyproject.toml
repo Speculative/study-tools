@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "flask>=3.0",
+    "sqlite-utils>=3.39",
 ]
 
 [project.scripts]
