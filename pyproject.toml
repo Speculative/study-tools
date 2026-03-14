@@ -1,0 +1,13 @@
+[project]
+name = "study-tools"
+version = "0.1.0"
+description = "Qualitative coding tools for study session videos"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "flask>=3.0",
+]
+
+[project.scripts]
+study-web = "web.__main__:main"
+study-transcript = "transcript.__main__:main"
