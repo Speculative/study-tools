@@ -219,10 +219,6 @@ def add_section(pid: str):
         "start_ts": _seconds_to_ts(int(start_seconds)),
     }
 
-    # If htmx request, return an HTML fragment
-    if request.headers.get("HX-Request"):
-        return render_template("_section_row.html", sec=sec)
-
     return jsonify(sec)
 
 
@@ -294,21 +290,21 @@ def codebook():
 
     # All notes
     all_notes = list(db.execute(
-        "SELECT id, pid, text, start_seconds FROM notes ORDER BY start_seconds"
+        "SELECT id, pid, text, start_seconds, end_seconds FROM notes ORDER BY start_seconds"
     ).fetchall())
-    all_notes = [{"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3]} for r in all_notes]
+    all_notes = [{"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3], "end_seconds": r[4]} for r in all_notes]
 
     uncategorized = [n for n in all_notes if n["id"] not in coded_note_ids]
 
     # For each code, fetch its notes ordered by sort_order
     for c in code_list:
         c["notes"] = list(db.execute(
-            "SELECT n.id, n.pid, n.text, n.start_seconds "
+            "SELECT n.id, n.pid, n.text, n.start_seconds, n.end_seconds "
             "FROM notes n JOIN note_codes nc ON nc.note_id = n.id "
             "WHERE nc.code_id = ? ORDER BY nc.sort_order, nc.id",
             [c["id"]],
         ).fetchall())
-        c["notes"] = [{"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3]} for r in c["notes"]]
+        c["notes"] = [{"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3], "end_seconds": r[4]} for r in c["notes"]]
 
     return render_template("codebook.html", codes=code_list, uncategorized=uncategorized)
 

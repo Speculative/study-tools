@@ -74,7 +74,19 @@
           <tbody id="transcript-body">
             {% for row in rows %}
               {% if row.type == "section" %}
-                {% with sec = row %}{% include "_section_row.html" %}{% endwith %}
+                <tr class="section-header"
+                    data-section-id="{{ row.id }}"
+                    data-section-start="{{ row.start_seconds }}"
+                    style="background:#f0f4ff; cursor:pointer; border-top:2px solid #c7d2fe;">
+                  <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; font-size:0.8rem;">{{ row.start_ts }}</td>
+                  <td colspan="2" style="padding:5px 8px; font-weight:600; color:#3730a3;">
+                    <span class="section-toggle" style="margin-right:4px; font-size:0.75rem;">▼</span>{{ row.name }}
+                    <button class="section-delete-btn"
+                            data-section-id="{{ row.id }}"
+                            style="float:right; font-size:0.75rem; color:#9ca3af; background:none; border:none; cursor:pointer; padding:0 4px;"
+                            title="Delete section">✕</button>
+                  </td>
+                </tr>
               {% elif row.type in ("note_instant", "note_start", "note_end") %}
                 <tr class="note-row note-{{ row.type.split('_')[1] }}"
                     data-note-id="{{ row.id }}"
@@ -283,7 +295,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Add section — inline input, htmx POST for persistence
+  // Add section — inline input, JSON POST for persistence
   // ---------------------------------------------------------------------------
   let _sectionInputActive = false;
   let _allSectionNames = [];
@@ -383,33 +395,35 @@
   async function confirmSection(name, startSeconds) {
     const res = await fetch(`/api/sessions/${PID}/sections`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "HX-Request": "true",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, start_seconds: startSeconds }),
     });
     if (!res.ok) { cancelSectionInput(); return; }
 
-    const html = await res.text();
+    const sec = await res.json();
     const inputRow = document.getElementById("section-input-row");
-
-    // Parse returned HTML fragment into a real element
-    const tmp = document.createElement("tbody");
-    tmp.innerHTML = html.trim();
-    const newRow = tmp.firstElementChild;
-
-    // Replace the input row with the confirmed section row
+    const newRow = buildSectionRow(sec);
     inputRow.replaceWith(newRow);
     _sectionInputActive = false;
-
-    const sec = {
-      id: parseInt(newRow.getAttribute("data-section-id")),
-      start_seconds: parseInt(newRow.getAttribute("data-section-start")),
-      start_ts: secondsToTs(parseInt(newRow.getAttribute("data-section-start"))),
-      name,
-    };
     _mutateSection(sec, null);
+  }
+
+  function buildSectionRow(sec) {
+    const tr = document.createElement("tr");
+    tr.className = "section-header";
+    tr.dataset.sectionId = sec.id;
+    tr.dataset.sectionStart = sec.start_seconds;
+    tr.style.cssText = "background:#f0f4ff; cursor:pointer; border-top:2px solid #c7d2fe;";
+    tr.innerHTML = `
+      <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; font-size:0.8rem;">${sec.start_ts}</td>
+      <td colspan="2" style="padding:5px 8px; font-weight:600; color:#3730a3;">
+        <span class="section-toggle" style="margin-right:4px; font-size:0.75rem;">▼</span>${escHtml(sec.name)}
+        <button class="section-delete-btn"
+                data-section-id="${sec.id}"
+                style="float:right; font-size:0.75rem; color:#9ca3af; background:none; border:none; cursor:pointer; padding:0 4px;"
+                title="Delete section">✕</button>
+      </td>`;
+    return tr;
   }
 
   async function deleteSection(secId) {
