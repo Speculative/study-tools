@@ -274,3 +274,119 @@ def delete_note(note_id: int):
     db = get_db()
     db["notes"].delete(note_id)
     return "", 200
+
+
+# ---------------------------------------------------------------------------
+# Codebook page
+# ---------------------------------------------------------------------------
+
+@bp.get("/codebook")
+def codebook():
+    db = get_db()
+
+    codes = list(db.execute("SELECT id, name FROM codes ORDER BY name").fetchall())
+    code_list = [{"id": r[0], "name": r[1]} for r in codes]
+
+    # Notes that have at least one code assignment
+    coded_note_ids = set(
+        r[0] for r in db.execute("SELECT DISTINCT note_id FROM note_codes").fetchall()
+    )
+
+    # All notes
+    all_notes = list(db.execute(
+        "SELECT id, pid, text, start_seconds FROM notes ORDER BY start_seconds"
+    ).fetchall())
+    all_notes = [{"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3]} for r in all_notes]
+
+    uncategorized = [n for n in all_notes if n["id"] not in coded_note_ids]
+
+    # For each code, fetch its notes ordered by sort_order
+    for c in code_list:
+        c["notes"] = list(db.execute(
+            "SELECT n.id, n.pid, n.text, n.start_seconds "
+            "FROM notes n JOIN note_codes nc ON nc.note_id = n.id "
+            "WHERE nc.code_id = ? ORDER BY nc.sort_order, nc.id",
+            [c["id"]],
+        ).fetchall())
+        c["notes"] = [{"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3]} for r in c["notes"]]
+
+    return render_template("codebook.html", codes=code_list, uncategorized=uncategorized)
+
+
+# ---------------------------------------------------------------------------
+# Codes API
+# ---------------------------------------------------------------------------
+
+@bp.post("/api/codes")
+def create_code():
+    payload = request.get_json(silent=True) or {}
+    name = payload.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    db = get_db()
+    row_id = db["codes"].insert({"name": name}).last_pk
+    return jsonify({"id": row_id, "name": name}), 201
+
+
+@bp.patch("/api/codes/<int:code_id>")
+def update_code(code_id: int):
+    payload = request.get_json(silent=True) or {}
+    name = payload.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    db = get_db()
+    db["codes"].update(code_id, {"name": name})
+    return jsonify({"id": code_id, "name": name})
+
+
+@bp.delete("/api/codes/<int:code_id>")
+def delete_code(code_id: int):
+    db = get_db()
+    db.execute("DELETE FROM note_codes WHERE code_id = ?", [code_id])
+    db["codes"].delete(code_id)
+    return "", 200
+
+
+@bp.post("/api/codes/<int:code_id>/notes/<int:note_id>")
+def assign_note_to_code(code_id: int, note_id: int):
+    db = get_db()
+    exists = db.execute(
+        "SELECT 1 FROM note_codes WHERE code_id = ? AND note_id = ?",
+        [code_id, note_id],
+    ).fetchone()
+    if not exists:
+        max_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM note_codes WHERE code_id = ?",
+            [code_id],
+        ).fetchone()[0]
+        db["note_codes"].insert({
+            "note_id": note_id, "code_id": code_id,
+            "source": "note", "sort_order": max_order + 1,
+        })
+    return "", 204
+
+
+@bp.delete("/api/codes/<int:code_id>/notes/<int:note_id>")
+def remove_note_from_code(code_id: int, note_id: int):
+    db = get_db()
+    db.execute(
+        "DELETE FROM note_codes WHERE code_id = ? AND note_id = ?",
+        [code_id, note_id],
+    )
+    return "", 204
+
+
+@bp.put("/api/codes/<int:code_id>/order")
+def reorder_code_notes(code_id: int):
+    """Accepts {note_ids: [id, id, …]} and updates sort_order to match."""
+    payload = request.get_json(silent=True) or {}
+    note_ids = payload.get("note_ids", [])
+    if not isinstance(note_ids, list):
+        return jsonify({"error": "note_ids must be a list"}), 400
+    db = get_db()
+    for i, note_id in enumerate(note_ids):
+        db.execute(
+            "UPDATE note_codes SET sort_order = ? WHERE code_id = ? AND note_id = ?",
+            [i, code_id, note_id],
+        )
+    return "", 204

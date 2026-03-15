@@ -1,0 +1,463 @@
+{% extends "base.html" %}
+{% block title %}Codebook{% endblock %}
+{% block content %}
+
+<h1 class="text-2xl font-bold mb-6">Codebook</h1>
+
+<div id="codebook" class="flex flex-col gap-6 max-w-3xl">
+
+  <!-- Uncategorized -->
+  <div
+    id="bin-uncategorized"
+    class="code-bin rounded-lg border border-gray-200 bg-white shadow-sm"
+    data-code-id="uncategorized"
+  >
+    <div class="px-4 py-2 border-b border-gray-100 bg-gray-50 rounded-t-lg flex items-center gap-2">
+      <span class="font-semibold text-gray-600 text-sm uppercase tracking-wide">Uncategorized</span>
+      <span class="text-xs text-gray-400 note-count">({{ uncategorized|length }})</span>
+    </div>
+    <div class="note-list px-4 py-2 flex flex-wrap gap-2 min-h-10">
+      {% for note in uncategorized %}
+      <div
+        class="note-chip border border-gray-200 bg-gray-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none"
+        draggable="true"
+        data-note-id="{{ note.id }}"
+      >
+        <span class="text-gray-400 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}</span
+        ><span class="text-gray-800">{{ note.text }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Named codes -->
+  {% for code in codes %}
+  <div
+    id="bin-{{ code.id }}"
+    class="code-bin rounded-lg border border-blue-200 bg-white shadow-sm"
+    data-code-id="{{ code.id }}"
+  >
+    <div class="px-4 py-2 border-b border-blue-100 bg-blue-50 rounded-t-lg flex items-center gap-2">
+      <span
+        class="code-name font-semibold text-blue-800 text-sm cursor-pointer"
+        title="Double-click to rename"
+        ondblclick="startRenameCode(this, {{ code.id }})"
+      >{{ code.name }}</span>
+      <span class="text-xs text-blue-300 note-count">({{ code.notes|length }})</span>
+      <button
+        class="ml-auto text-red-300 hover:text-red-500 text-xs"
+        onclick="deleteCode({{ code.id }})"
+        title="Delete code"
+      >✕</button>
+    </div>
+    <div class="note-list px-4 py-2 flex flex-wrap gap-2 min-h-10 relative">
+      {% for note in code.notes %}
+      <div
+        class="note-chip border border-blue-200 bg-blue-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none"
+        draggable="true"
+        data-note-id="{{ note.id }}"
+      >
+        <span class="text-blue-300 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}</span
+        ><span class="text-gray-800">{{ note.text }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  <!-- New code -->
+  <div id="new-code-collapsed" class="rounded-lg border border-dashed border-gray-300 px-4 py-2">
+    <button
+      class="w-full text-left text-sm text-gray-400 hover:text-blue-600 font-medium transition-colors"
+      onclick="showNewCodeInput()"
+    >+ New code</button>
+  </div>
+  <div id="new-code-form" class="hidden rounded-lg border border-blue-300 bg-white px-4 py-3">
+    <input
+      id="new-code-input"
+      type="text"
+      class="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+      placeholder="Code name…"
+      onkeydown="handleNewCodeKey(event)"
+    />
+    <div class="flex gap-2 mt-2">
+      <button class="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700" onclick="submitNewCode()">Create</button>
+      <button class="text-xs text-gray-500 hover:text-gray-700" onclick="hideNewCodeInput()">Cancel</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Drop indicator bar (shared, moved around the DOM) -->
+<div id="drop-bar" class="hidden bg-blue-500 rounded pointer-events-none" style="position:absolute;width:2px;"></div>
+
+<style>
+  .note-chip.dragging { opacity: 0.35; }
+  .code-bin.drag-over > .note-list { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
+</style>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let _dragging = null;   // { noteId, fromCodeId, el }
+let _dropTarget = null; // { codeId, afterNoteId | null }  — null afterNoteId = append
+
+const BAR = document.getElementById("drop-bar");
+
+// ---------------------------------------------------------------------------
+// Chip factory
+// ---------------------------------------------------------------------------
+function makeChip(noteId, pid, ts, text, inCode) {
+  const d = document.createElement("div");
+  d.className = chipClass(inCode);
+  d.draggable = true;
+  d.dataset.noteId = String(noteId);
+  d.innerHTML =
+    `<span class="${metaClass(inCode)}">${escHtml(pid)}·${escHtml(ts)} </span>` +
+    `<span class="text-gray-800">${escHtml(text)}</span>`;
+  return d;
+}
+
+function chipClass(inCode) {
+  return inCode
+    ? "note-chip border border-blue-200 bg-blue-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none"
+    : "note-chip border border-gray-200 bg-gray-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none";
+}
+function metaClass(inCode) {
+  return inCode ? "text-blue-300 text-xs mr-1" : "text-gray-400 text-xs mr-1";
+}
+
+// ---------------------------------------------------------------------------
+// Drag start / end
+// ---------------------------------------------------------------------------
+document.addEventListener("dragstart", e => {
+  const chip = e.target.closest(".note-chip");
+  if (!chip) return;
+  const bin = chip.closest(".code-bin");
+  _dragging = {
+    noteId: +chip.dataset.noteId,
+    fromCodeId: bin ? bin.dataset.codeId : null,
+    el: chip,
+  };
+  // Use rAF so the chip hasn't visually moved yet when screenshot is taken
+  requestAnimationFrame(() => chip.classList.add("dragging"));
+});
+
+document.addEventListener("dragend", () => {
+  if (_dragging) _dragging.el.classList.remove("dragging");
+  _dragging = null;
+  _dropTarget = null;
+  BAR.classList.add("hidden");
+  document.querySelectorAll(".code-bin.drag-over").forEach(b => b.classList.remove("drag-over"));
+});
+
+// ---------------------------------------------------------------------------
+// Drag over — compute insertion point and show bar
+// ---------------------------------------------------------------------------
+document.addEventListener("dragover", e => {
+  if (!_dragging) return;
+  const bin = e.target.closest(".code-bin");
+  if (!bin) { BAR.classList.add("hidden"); return; }
+  e.preventDefault();
+
+  // Highlight bin
+  document.querySelectorAll(".code-bin.drag-over").forEach(b => {
+    if (b !== bin) b.classList.remove("drag-over");
+  });
+  bin.classList.add("drag-over");
+
+  const list = bin.querySelector(".note-list");
+  const chips = [...list.querySelectorAll(".note-chip")].filter(c => c !== _dragging.el);
+
+  if (chips.length === 0) {
+    // Empty list — bar at bottom of list area
+    positionBarInList(list, null, null);
+    _dropTarget = { codeId: bin.dataset.codeId, afterNoteId: null };
+    return;
+  }
+
+  // Chips wrap inline — find nearest chip by 2D distance, then decide
+  // left-of-midX → insert before it, right-of-midX → insert after it.
+  let bestChip = null;
+  let bestBefore = true;
+  let bestDist = Infinity;
+
+  chips.forEach(chip => {
+    const r = chip.getBoundingClientRect();
+    const midX = r.left + r.width / 2;
+    const midY = r.top + r.height / 2;
+    const dist = Math.hypot(e.clientX - midX, e.clientY - midY);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestChip = chip;
+      bestBefore = e.clientX < midX;
+    }
+  });
+
+  if (bestBefore) {
+    positionBarBefore(bestChip);
+    _dropTarget = {
+      codeId: bin.dataset.codeId,
+      afterNoteId: prevNoteId(bestChip, chips),
+    };
+  } else {
+    positionBarAfter(bestChip);
+    _dropTarget = {
+      codeId: bin.dataset.codeId,
+      afterNoteId: +bestChip.dataset.noteId,
+    };
+  }
+});
+
+function prevNoteId(chip, chips) {
+  const idx = chips.indexOf(chip);
+  return idx > 0 ? +chips[idx - 1].dataset.noteId : null;
+}
+
+// Vertical bar to the left edge of `chip`
+function positionBarBefore(chip) {
+  const list = chip.closest(".note-list");
+  const listRect = list.getBoundingClientRect();
+  const chipRect = chip.getBoundingClientRect();
+  list.style.position = "relative";
+  list.appendChild(BAR);
+  BAR.style.left   = (chipRect.left - listRect.left - 2) + "px";
+  BAR.style.top    = (chipRect.top  - listRect.top)  + "px";
+  BAR.style.height = chipRect.height + "px";
+  BAR.style.right  = "";
+  BAR.style.width  = "2px";
+  BAR.classList.remove("hidden");
+}
+
+// Vertical bar to the right edge of `chip`
+function positionBarAfter(chip) {
+  const list = chip.closest(".note-list");
+  const listRect = list.getBoundingClientRect();
+  const chipRect = chip.getBoundingClientRect();
+  list.style.position = "relative";
+  list.appendChild(BAR);
+  BAR.style.left   = (chipRect.right - listRect.left + 2) + "px";
+  BAR.style.top    = (chipRect.top   - listRect.top)  + "px";
+  BAR.style.height = chipRect.height + "px";
+  BAR.style.right  = "";
+  BAR.style.width  = "2px";
+  BAR.classList.remove("hidden");
+}
+
+// Empty list — short bar at left edge of list
+function positionBarInList(list) {
+  list.style.position = "relative";
+  list.appendChild(BAR);
+  BAR.style.left   = "0px";
+  BAR.style.top    = "4px";
+  BAR.style.height = "24px";
+  BAR.style.right  = "";
+  BAR.style.width  = "2px";
+  BAR.classList.remove("hidden");
+}
+
+document.addEventListener("dragleave", e => {
+  const bin = e.target.closest(".code-bin");
+  if (bin && !bin.contains(e.relatedTarget)) {
+    bin.classList.remove("drag-over");
+    BAR.classList.add("hidden");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Drop
+// ---------------------------------------------------------------------------
+document.addEventListener("drop", async e => {
+  if (!_dragging || !_dropTarget) return;
+  e.preventDefault();
+  BAR.classList.add("hidden");
+  document.querySelectorAll(".code-bin.drag-over").forEach(b => b.classList.remove("drag-over"));
+
+  const { noteId, fromCodeId, el: chip } = _dragging;
+  const { codeId: toCodeId, afterNoteId } = _dropTarget;
+  _dragging = null;
+  _dropTarget = null;
+  chip.classList.remove("dragging");
+
+  const toBin = document.querySelector(`.code-bin[data-code-id="${toCodeId}"]`);
+  if (!toBin) return;
+  const toList = toBin.querySelector(".note-list");
+  const inCode = toCodeId !== "uncategorized";
+
+  // Update chip styling
+  chip.className = chipClass(inCode);
+  chip.querySelector("span").className = metaClass(inCode);
+
+  // Insert into correct position in DOM
+  if (afterNoteId === null) {
+    // Prepend (before all) if explicitly before first, or append if list was empty
+    const firstChip = toList.querySelector(".note-chip");
+    if (firstChip && firstChip !== chip) {
+      toList.insertBefore(chip, firstChip);
+    } else if (!firstChip) {
+      toList.appendChild(chip);
+    }
+    // If afterNoteId is null but there are chips and chip === firstChip, no-op positionally
+  } else {
+    const afterEl = toList.querySelector(`.note-chip[data-note-id="${afterNoteId}"]`);
+    if (afterEl) {
+      afterEl.insertAdjacentElement("afterend", chip);
+    } else {
+      toList.appendChild(chip);
+    }
+  }
+
+  updateCount(toBin);
+  if (fromCodeId && fromCodeId !== toCodeId) {
+    const fromBin = document.querySelector(`.code-bin[data-code-id="${fromCodeId}"]`);
+    if (fromBin) updateCount(fromBin);
+  }
+
+  // --- Persist ---
+  const movedBetweenCodes = fromCodeId !== toCodeId;
+
+  if (movedBetweenCodes) {
+    if (inCode) {
+      await fetch(`/api/codes/${toCodeId}/notes/${noteId}`, { method: "POST" });
+    }
+    if (fromCodeId && fromCodeId !== "uncategorized") {
+      await fetch(`/api/codes/${fromCodeId}/notes/${noteId}`, { method: "DELETE" });
+    }
+  }
+
+  // Always persist order within the target code
+  if (inCode) {
+    const orderedIds = [...toList.querySelectorAll(".note-chip")].map(c => +c.dataset.noteId);
+    await fetch(`/api/codes/${toCodeId}/order`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note_ids: orderedIds }),
+    });
+  }
+});
+
+function updateCount(bin) {
+  const n = bin.querySelectorAll(".note-chip").length;
+  bin.querySelector(".note-count").textContent = `(${n})`;
+}
+
+// ---------------------------------------------------------------------------
+// New code
+// ---------------------------------------------------------------------------
+function showNewCodeInput() {
+  document.getElementById("new-code-collapsed").classList.add("hidden");
+  document.getElementById("new-code-form").classList.remove("hidden");
+  document.getElementById("new-code-input").focus();
+}
+function hideNewCodeInput() {
+  document.getElementById("new-code-form").classList.add("hidden");
+  document.getElementById("new-code-collapsed").classList.remove("hidden");
+  document.getElementById("new-code-input").value = "";
+}
+function handleNewCodeKey(e) {
+  if (e.key === "Enter") submitNewCode();
+  if (e.key === "Escape") hideNewCodeInput();
+}
+async function submitNewCode() {
+  const input = document.getElementById("new-code-input");
+  const name = input.value.trim();
+  if (!name) return;
+  const res = await fetch("/api/codes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) return;
+  const code = await res.json();
+  hideNewCodeInput();
+  insertCodeBin(code);
+}
+
+function insertCodeBin(code) {
+  const anchor = document.getElementById("new-code-collapsed");
+  const bin = document.createElement("div");
+  bin.id = `bin-${code.id}`;
+  bin.className = "code-bin rounded-lg border border-blue-200 bg-white shadow-sm";
+  bin.dataset.codeId = String(code.id);
+  bin.innerHTML = `
+    <div class="px-4 py-2 border-b border-blue-100 bg-blue-50 rounded-t-lg flex items-center gap-2">
+      <span
+        class="code-name font-semibold text-blue-800 text-sm cursor-pointer"
+        title="Double-click to rename"
+        ondblclick="startRenameCode(this, ${code.id})"
+      >${escHtml(code.name)}</span>
+      <span class="text-xs text-blue-300 note-count">(0)</span>
+      <button class="ml-auto text-red-300 hover:text-red-500 text-xs" onclick="deleteCode(${code.id})" title="Delete code">✕</button>
+    </div>
+    <div class="note-list px-4 py-2 flex flex-wrap gap-2 min-h-10 relative"></div>
+  `;
+  document.getElementById("codebook").insertBefore(bin, anchor);
+}
+
+// ---------------------------------------------------------------------------
+// Rename
+// ---------------------------------------------------------------------------
+function startRenameCode(nameEl, codeId) {
+  const current = nameEl.textContent.trim();
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = current;
+  input.className = "border border-blue-300 rounded px-1 text-sm font-semibold text-blue-800 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-blue-50";
+  nameEl.replaceWith(input);
+  input.focus(); input.select();
+
+  const finish = async save => {
+    const name = input.value.trim();
+    const span = document.createElement("span");
+    span.className = "code-name font-semibold text-blue-800 text-sm cursor-pointer";
+    span.title = "Double-click to rename";
+    span.ondblclick = () => startRenameCode(span, codeId);
+    if (save && name && name !== current) {
+      await fetch(`/api/codes/${codeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      span.textContent = name;
+    } else {
+      span.textContent = current;
+    }
+    input.replaceWith(span);
+  };
+
+  let _blurGuard = false;
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter")  { _blurGuard = true; finish(true); }
+    if (e.key === "Escape") { _blurGuard = true; finish(false); }
+  });
+  input.addEventListener("blur", () => { if (!_blurGuard) finish(true); });
+}
+
+// ---------------------------------------------------------------------------
+// Delete code
+// ---------------------------------------------------------------------------
+async function deleteCode(codeId) {
+  if (!confirm("Delete this code? Notes will return to Uncategorized.")) return;
+  const res = await fetch(`/api/codes/${codeId}`, { method: "DELETE" });
+  if (!res.ok) return;
+  const bin = document.getElementById(`bin-${codeId}`);
+  const uncatList = document.querySelector("#bin-uncategorized .note-list");
+  bin.querySelectorAll(".note-chip").forEach(chip => {
+    chip.className = chipClass(false);
+    chip.querySelector("span").className = metaClass(false);
+    uncatList.appendChild(chip);
+  });
+  updateCount(document.getElementById("bin-uncategorized"));
+  bin.remove();
+}
+
+// ---------------------------------------------------------------------------
+// Util
+// ---------------------------------------------------------------------------
+function escHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+</script>
+
+{% endblock %}

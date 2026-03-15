@@ -12,8 +12,12 @@
   <body class="bg-gray-50 text-gray-900 {% block body_class %}{% endblock %}">
     {% block body %}
     <div class="max-w-6xl mx-auto p-4">
-      <header class="mb-6">
+      <header class="mb-6 flex items-center gap-6">
         <a href="/" class="text-xl font-semibold">Study Sessions</a>
+        <nav class="flex gap-4 text-sm font-medium text-gray-600">
+          <a href="/" class="hover:text-blue-700 transition-colors">Sessions</a>
+          <a href="/codebook" class="hover:text-blue-700 transition-colors">Codebook</a>
+        </nav>
       </header>
       {% block content %}{% endblock %}
     </div>
