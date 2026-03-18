@@ -62,3 +62,21 @@ def _init_schema(db: sqlite_utils.Database) -> None:
         db["note_codes"].create_index(["code_id"])
     elif "sort_order" not in db["note_codes"].columns_dict:
         db.execute("ALTER TABLE note_codes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+
+    if "sheet_columns" not in db.table_names():
+        db["sheet_columns"].create({
+            "id": int,
+            "name": str,
+            "col_type": str,  # 'string' | 'int' | 'duration'
+            "sort_order": int,
+        }, pk="id", not_null={"name", "col_type", "sort_order"})
+
+    if "sheet_cells" not in db.table_names():
+        db["sheet_cells"].create({
+            "id": int,
+            "pid": str,
+            "col_id": int,
+            "value": str,
+        }, pk="id", not_null={"pid", "col_id"},
+           foreign_keys=[("col_id", "sheet_columns", "id")])
+        db["sheet_cells"].create_index(["pid", "col_id"], unique=True)

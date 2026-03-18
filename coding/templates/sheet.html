@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+{% block title %}Sheet – Study Sessions{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <h2 class="text-lg font-semibold">Session Sheet</h2>
+  <button id="add-col-btn" class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">+ Add Column</button>
+</div>
+
+<div class="overflow-x-auto">
+  <table id="sheet-table" class="w-full text-sm border-collapse">
+    <thead>
+      <tr class="bg-gray-100 text-left">
+        <th class="px-3 py-2 border border-gray-200 font-medium text-gray-700 min-w-[120px]">Participant</th>
+        {% for col in columns %}
+        <th class="px-3 py-2 border border-gray-200 font-medium text-gray-700 min-w-[140px] group" data-col-id="{{ col.id }}" data-col-type="{{ col.col_type }}">
+          <div class="flex items-center gap-1">
+            <span class="col-name flex-1 cursor-pointer hover:text-blue-600" title="Click to rename">{{ col.name }}</span>
+            <span class="text-xs text-gray-400 font-normal">[{{ col.col_type }}]</span>
+            <button class="delete-col-btn opacity-0 group-hover:opacity-100 ml-1 text-gray-400 hover:text-red-500 transition-opacity" data-col-id="{{ col.id }}" title="Delete column">✕</button>
+          </div>
+        </th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for pid in participants %}
+      <tr class="hover:bg-gray-50" data-pid="{{ pid }}">
+        <td class="px-3 py-2 border border-gray-200 font-medium text-gray-700">{{ pid }}</td>
+        {% for col in columns %}
+        <td class="px-0 py-0 border border-gray-200 relative" data-col-id="{{ col.id }}" data-col-type="{{ col.col_type }}">
+          <input
+            class="sheet-cell w-full h-full px-3 py-2 bg-transparent outline-none focus:bg-white focus:ring-2 focus:ring-blue-400 focus:ring-inset"
+            type="text"
+            data-pid="{{ pid }}"
+            data-col-id="{{ col.id }}"
+            data-col-type="{{ col.col_type }}"
+            value="{{ cells.get(pid, {}).get(col.id, '') }}"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div class="autocomplete-dropdown hidden absolute left-0 top-full z-10 bg-white border border-gray-200 rounded shadow-lg min-w-full max-h-48 overflow-y-auto"></div>
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Add Column Modal -->
+<div id="add-col-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+  <div class="bg-white rounded-lg shadow-xl p-6 w-80">
+    <h3 class="text-base font-semibold mb-4">Add Column</h3>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+    <input id="new-col-name" type="text" class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="Column name" />
+    <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+    <select id="new-col-type" class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-400">
+      <option value="string">String (text)</option>
+      <option value="int">Integer</option>
+      <option value="duration">Duration (HH:MM:SS)</option>
+    </select>
+    <div class="flex gap-2 justify-end">
+      <button id="add-col-cancel" class="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50">Cancel</button>
+      <button id="add-col-confirm" class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Add</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function parseDuration(s) {
+  // Accept HH:MM:SS, MM:SS, or plain seconds integer
+  s = s.trim();
+  if (!s) return null;
+  const parts = s.split(':').map(Number);
+  if (parts.some(isNaN)) return null;
+  if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
+  if (parts.length === 2) return parts[0]*60 + parts[1];
+  if (parts.length === 1) return parts[0];
+  return null;
+}
+
+function formatDuration(secs) {
+  if (secs === null || secs === undefined || secs === '') return '';
+  secs = parseInt(secs, 10);
+  if (isNaN(secs)) return '';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function validateCell(value, colType) {
+  if (colType === 'int') return value === '' || /^-?\d+$/.test(value.trim());
+  if (colType === 'duration') return value === '' || parseDuration(value) !== null;
+  return true;
+}
+
+// ── Cell save ──────────────────────────────────────────────────────────────
+
+async function saveCell(pid, colId, rawValue, colType) {
+  let value = rawValue.trim();
+  if (colType === 'duration' && value) {
+    const secs = parseDuration(value);
+    if (secs !== null) value = String(secs);
+  }
+  await fetch('/api/sheet/cells', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({pid, col_id: parseInt(colId), value}),
+  });
+}
+
+// ── Format display value ───────────────────────────────────────────────────
+
+function displayValue(rawValue, colType) {
+  if (colType === 'duration' && rawValue !== '') {
+    const n = parseInt(rawValue, 10);
+    if (!isNaN(n)) return formatDuration(n);
+  }
+  return rawValue;
+}
+
+// ── Autocomplete ───────────────────────────────────────────────────────────
+
+let _acCache = {};
+
+async function getColumnValues(colId) {
+  if (_acCache[colId]) return _acCache[colId];
+  const res = await fetch(`/api/sheet/columns/${colId}/values`);
+  const vals = await res.json();
+  _acCache[colId] = vals;
+  return vals;
+}
+
+function invalidateColumnCache(colId) {
+  delete _acCache[colId];
+}
+
+function showAutocomplete(input, suggestions) {
+  const td = input.closest('td');
+  const dd = td.querySelector('.autocomplete-dropdown');
+  dd.innerHTML = '';
+  if (!suggestions.length) { dd.classList.add('hidden'); return; }
+  suggestions.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'px-3 py-1.5 cursor-pointer hover:bg-blue-50 text-sm';
+    item.textContent = s;
+    item.addEventListener('mousedown', e => {
+      e.preventDefault();
+      input.value = s;
+      dd.classList.add('hidden');
+    });
+    dd.appendChild(item);
+  });
+  dd.classList.remove('hidden');
+}
+
+function hideAutocomplete(input) {
+  const td = input.closest('td');
+  const dd = td.querySelector('.autocomplete-dropdown');
+  dd.classList.add('hidden');
+}
+
+function focusCellBelow(input) {
+  const td = input.closest('td');
+  const tr = td.closest('tr');
+  const colIndex = Array.from(tr.children).indexOf(td);
+  const nextTr = tr.nextElementSibling;
+  if (!nextTr) return;
+  const nextTd = nextTr.children[colIndex];
+  if (!nextTd) return;
+  const nextInput = nextTd.querySelector('.sheet-cell');
+  if (nextInput) nextInput.focus();
+}
+
+// ── Wire up cells ──────────────────────────────────────────────────────────
+
+document.querySelectorAll('.sheet-cell').forEach(input => {
+  const colType = input.dataset.colType;
+  const colId = input.dataset.colId;
+  const pid = input.dataset.pid;
+
+  // Display format: convert stored seconds → HH:MM:SS for duration
+  input.value = displayValue(input.value, colType);
+
+  input.addEventListener('focus', async () => {
+    if (colType !== 'string') return;
+    const vals = await getColumnValues(colId);
+    const q = input.value.toLowerCase();
+    const filtered = vals.filter(v => v.toLowerCase().includes(q));
+    showAutocomplete(input, filtered);
+  });
+
+  input.addEventListener('input', async () => {
+    if (colType === 'int') {
+      input.classList.toggle('bg-red-50', !validateCell(input.value, 'int'));
+    }
+    if (colType === 'duration') {
+      const ok = validateCell(input.value, 'duration');
+      input.classList.toggle('bg-red-50', !ok);
+    }
+    if (colType === 'string') {
+      const vals = await getColumnValues(colId);
+      const q = input.value.toLowerCase();
+      const filtered = vals.filter(v => v.toLowerCase().includes(q));
+      showAutocomplete(input, filtered);
+    }
+  });
+
+  input.addEventListener('keydown', e => {
+    if (colType === 'string') {
+      const td = input.closest('td');
+      const dd = td.querySelector('.autocomplete-dropdown');
+      const items = dd.querySelectorAll('div');
+      const active = dd.querySelector('.bg-blue-100');
+      if (e.key === 'Tab' && !dd.classList.contains('hidden') && items.length) {
+        e.preventDefault();
+        const first = active || items[0];
+        input.value = first.textContent;
+        dd.classList.add('hidden');
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (active) { active.classList.remove('bg-blue-100'); const next = active.nextElementSibling; if (next) next.classList.add('bg-blue-100'); }
+        else if (items[0]) items[0].classList.add('bg-blue-100');
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (active) { active.classList.remove('bg-blue-100'); const prev = active.previousElementSibling; if (prev) prev.classList.add('bg-blue-100'); }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (active) { active.classList.remove('bg-blue-100'); input.value = active.textContent; dd.classList.add('hidden'); }
+        else { dd.classList.add('hidden'); }
+        focusCellBelow(input);
+      } else if (e.key === 'Escape') {
+        dd.classList.add('hidden');
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      input.blur();
+      focusCellBelow(input);
+    }
+  });
+
+  input.addEventListener('blur', async () => {
+    hideAutocomplete(input);
+    // Normalize duration display
+    if (colType === 'duration') {
+      const secs = parseDuration(input.value);
+      if (secs !== null) input.value = formatDuration(secs);
+      else if (input.value.trim() === '') input.value = '';
+    }
+    if (!validateCell(input.value, colType)) return; // don't save invalid
+    invalidateColumnCache(colId);
+    await saveCell(pid, colId, input.value, colType);
+  });
+});
+
+// ── Add column ─────────────────────────────────────────────────────────────
+
+const modal = document.getElementById('add-col-modal');
+document.getElementById('add-col-btn').addEventListener('click', () => {
+  document.getElementById('new-col-name').value = '';
+  document.getElementById('new-col-type').value = 'string';
+  modal.classList.remove('hidden');
+  setTimeout(() => document.getElementById('new-col-name').focus(), 50);
+});
+document.getElementById('add-col-cancel').addEventListener('click', () => modal.classList.add('hidden'));
+modal.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
+
+document.getElementById('add-col-confirm').addEventListener('click', async () => {
+  const name = document.getElementById('new-col-name').value.trim();
+  const col_type = document.getElementById('new-col-type').value;
+  if (!name) return;
+  const res = await fetch('/api/sheet/columns', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, col_type}),
+  });
+  if (res.ok) { modal.classList.add('hidden'); location.reload(); }
+});
+
+document.getElementById('new-col-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('add-col-confirm').click();
+  if (e.key === 'Escape') modal.classList.add('hidden');
+});
+
+// ── Delete column ──────────────────────────────────────────────────────────
+
+document.querySelectorAll('.delete-col-btn').forEach(btn => {
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const colId = btn.dataset.colId;
+    if (!confirm('Delete this column and all its data?')) return;
+    await fetch(`/api/sheet/columns/${colId}`, {method: 'DELETE'});
+    location.reload();
+  });
+});
+
+// ── Rename column ──────────────────────────────────────────────────────────
+
+document.querySelectorAll('.col-name').forEach(span => {
+  span.addEventListener('click', () => {
+    const th = span.closest('th');
+    const colId = th.dataset.colId;
+    const current = span.textContent.trim();
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = current;
+    inp.className = 'border border-blue-400 rounded px-1 py-0 text-sm w-full focus:outline-none';
+    span.replaceWith(inp);
+    inp.focus();
+    inp.select();
+    const commit = async () => {
+      const newName = inp.value.trim() || current;
+      await fetch(`/api/sheet/columns/${colId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: newName}),
+      });
+      location.reload();
+    };
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { inp.blur(); }
+      if (e.key === 'Escape') { inp.removeEventListener('blur', commit); location.reload(); }
+    });
+  });
+});
+</script>
+{% endblock %}

@@ -386,3 +386,94 @@ def reorder_code_notes(code_id: int):
             [i, code_id, note_id],
         )
     return "", 204
+
+
+# ---------------------------------------------------------------------------
+# Sheet page
+# ---------------------------------------------------------------------------
+
+@bp.get("/sheet")
+def sheet():
+    participants, _ = _load_all_participants()
+    db = get_db()
+    columns = list(db.execute(
+        "SELECT id, name, col_type FROM sheet_columns ORDER BY sort_order, id"
+    ).fetchall())
+    columns = [{"id": r[0], "name": r[1], "col_type": r[2]} for r in columns]
+
+    cells_raw = list(db.execute("SELECT pid, col_id, value FROM sheet_cells").fetchall())
+    cells: dict[str, dict[int, str]] = {}
+    for pid, col_id, value in cells_raw:
+        cells.setdefault(pid, {})[col_id] = value
+
+    return render_template("sheet.html", participants=participants, columns=columns, cells=cells)
+
+
+# ---------------------------------------------------------------------------
+# Sheet API
+# ---------------------------------------------------------------------------
+
+@bp.post("/api/sheet/columns")
+def create_sheet_column():
+    payload = request.get_json(silent=True) or {}
+    name = payload.get("name", "").strip()
+    col_type = payload.get("col_type", "string")
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    if col_type not in ("string", "int", "duration"):
+        return jsonify({"error": "invalid col_type"}), 400
+    db = get_db()
+    max_order = db.execute("SELECT COALESCE(MAX(sort_order), -1) FROM sheet_columns").fetchone()[0]
+    row_id = db["sheet_columns"].insert({
+        "name": name, "col_type": col_type, "sort_order": max_order + 1
+    }).last_pk
+    return jsonify({"id": row_id, "name": name, "col_type": col_type}), 201
+
+
+@bp.patch("/api/sheet/columns/<int:col_id>")
+def update_sheet_column(col_id: int):
+    payload = request.get_json(silent=True) or {}
+    name = payload.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    db = get_db()
+    db["sheet_columns"].update(col_id, {"name": name})
+    return jsonify({"id": col_id, "name": name})
+
+
+@bp.delete("/api/sheet/columns/<int:col_id>")
+def delete_sheet_column(col_id: int):
+    db = get_db()
+    db.execute("DELETE FROM sheet_cells WHERE col_id = ?", [col_id])
+    db["sheet_columns"].delete(col_id)
+    return "", 200
+
+
+@bp.put("/api/sheet/cells")
+def upsert_sheet_cell():
+    payload = request.get_json(silent=True) or {}
+    pid = payload.get("pid", "").strip()
+    col_id = payload.get("col_id")
+    value = payload.get("value", "")
+    if not pid or col_id is None:
+        return jsonify({"error": "pid and col_id required"}), 400
+    db = get_db()
+    existing = db.execute(
+        "SELECT id FROM sheet_cells WHERE pid = ? AND col_id = ?", [pid, col_id]
+    ).fetchone()
+    if existing:
+        db["sheet_cells"].update(existing[0], {"value": value})
+    else:
+        db["sheet_cells"].insert({"pid": pid, "col_id": col_id, "value": value})
+    return "", 204
+
+
+@bp.get("/api/sheet/columns/<int:col_id>/values")
+def sheet_column_values(col_id: int):
+    """Return distinct non-empty string values for a column (for autocomplete)."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT DISTINCT value FROM sheet_cells WHERE col_id = ? AND value != '' ORDER BY value",
+        [col_id],
+    ).fetchall()
+    return jsonify([r[0] for r in rows])
