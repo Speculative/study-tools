@@ -17,7 +17,7 @@
     <!-- Left column: video + hresize + tools -->
     <div id="left-col" style="display:flex; flex-direction:column; min-width:0; overflow:hidden; flex:0 0 75%;">
 
-      <div id="video-pane" style="flex:1 1 0; min-height:0; background:#000; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+      <div id="video-pane" style="flex:1 1 0; min-height:0; background:#000; overflow:hidden; display:flex; align-items:center; justify-content:center; position:relative;">
         <div id="player-target" style="aspect-ratio:16/9; max-width:100%; max-height:100%; width:auto; height:auto;"></div>
       </div>
 
@@ -138,6 +138,7 @@
       title: {{ pid|tojson }},
       src: {{ ("/video/" + pid)|tojson }},
       layout: new VidstackPlayerLayout({}),
+      autoplay: true
     });
     window.__vds = player;
 
@@ -632,8 +633,42 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Speed overlay
+  // ---------------------------------------------------------------------------
+  let _speedOverlayTimer = null;
+
+  function showSpeedOverlay(speed) {
+    let el = document.getElementById("speed-overlay");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "speed-overlay";
+      el.style.cssText = [
+        "position:absolute", "inset:0", "display:flex",
+        "align-items:center", "justify-content:center",
+        "pointer-events:none", "z-index:10",
+      ].join(";");
+      document.getElementById("video-pane").appendChild(el);
+    }
+    el.innerHTML = `<span style="
+      font-size:3rem; font-weight:700; color:#fff;
+      background:rgba(0,0,0,0.45); border-radius:12px;
+      padding:8px 24px; letter-spacing:0.02em;
+      transition:opacity 0.15s;
+    ">${speed}x</span>`;
+    el.style.opacity = "1";
+
+    clearTimeout(_speedOverlayTimer);
+    _speedOverlayTimer = setTimeout(() => {
+      el.style.transition = "opacity 0.3s";
+      el.style.opacity = "0";
+    }, 700);
+  }
+
+  // ---------------------------------------------------------------------------
   // Hotkeys
   // ---------------------------------------------------------------------------
+  const SPEEDS = [1, 2, 4];
+
   function attachHotkeyHandlers() {
     document.addEventListener("keydown", (e) => {
       const tag = document.activeElement?.tagName;
@@ -641,6 +676,24 @@
 
       const player = window.__vds;
       if (!player) return;
+
+      if (e.ctrlKey && e.code === "ArrowUp") {
+        e.preventDefault();
+        const cur = player.playbackRate ?? 1;
+        const idx = SPEEDS.indexOf(cur);
+        const next = SPEEDS[Math.min(SPEEDS.length - 1, idx + 1)];
+        player.playbackRate = next;
+        showSpeedOverlay(next);
+        return;
+      } else if (e.ctrlKey && e.code === "ArrowDown") {
+        e.preventDefault();
+        const cur = player.playbackRate ?? 1;
+        const idx = SPEEDS.indexOf(cur);
+        const next = SPEEDS[Math.max(0, idx - 1)];
+        player.playbackRate = next;
+        showSpeedOverlay(next);
+        return;
+      }
 
       if (e.code === "Space") {
         e.preventDefault();
