@@ -355,6 +355,19 @@ document.addEventListener("drop", async e => {
     }
   }
 
+  // If dropped onto uncategorized, check whether other code bins still hold this note.
+  // If so, this was a "copy" — don't actually show it in uncategorized; remove the chip.
+  if (!inCode && movedBetweenCodes) {
+    const otherBins = [...document.querySelectorAll(`.code-bin:not([data-code-id="uncategorized"])`)];
+    const stillCoded = otherBins.some(b =>
+      b.querySelector(`.note-chip[data-note-id="${noteId}"]`)
+    );
+    if (stillCoded) {
+      chip.remove();
+      updateCount(toBin);
+    }
+  }
+
   // Always persist order within the target code
   if (inCode) {
     const orderedIds = [...toList.querySelectorAll(".note-chip")].map(c => +c.dataset.noteId);
