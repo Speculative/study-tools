@@ -39,6 +39,8 @@
             </defs>
             <!-- sections layer -->
             <g id="tl-sections"></g>
+            <!-- activity layer -->
+            <g id="tl-activities"></g>
             <!-- time axis -->
             <g id="tl-axis"></g>
             <!-- notes layer -->
@@ -198,6 +200,18 @@
   // ---------------------------------------------------------------------------
   let _sections = {{ sections|tojson }};
   let _notes = {{ notes|tojson }};
+
+  // Activity timeline data: { 1: [{start_seconds, end_seconds, category}, ...], 2: [...] }
+  // task_order 1 = first task the participant did, 2 = second task.
+  const ACTIVITIES_BY_TASK_ORDER = {{ activities_by_task_order|tojson }};
+
+  const ACTIVITY_COLORS = {
+    read_code:    "#7eb3d4",
+    edit_code:    "#e07b54",
+    read_readme:  "#a3c97a",
+    terminal:     "#b07fc4",
+    exec_inspect: "#f0c050",
+  };
 
   function _mutateSection(added, removedId) {
     if (added) {
@@ -830,11 +844,13 @@
 
   // Layout constants (px, logical — SVG uses viewBox so these are just ratios)
   const TL = {
-    TRACK_Y: 28,       // top of section track band
-    TRACK_H: 22,       // height of section track band
-    AXIS_Y: 50,        // y of the time axis labels row
-    NOTE_TOP_Y: 56,    // where annotation stems start below the track
-    NOTE_LANE_H: 32,   // height reserved per annotation lane
+    TRACK_Y: 28,          // top of section track band
+    TRACK_H: 14,          // height of section track band
+    ACT_TRACK_Y: 43,      // top of activity track band (directly below section track)
+    ACT_TRACK_H: 10,      // height of activity track band
+    AXIS_Y: 60,           // y of the time axis labels row
+    NOTE_TOP_Y: 68,       // where annotation stems start below the track
+    NOTE_LANE_H: 32,      // height reserved per annotation lane
   };
 
   function _tlDuration() {
@@ -881,9 +897,11 @@
 
     // Clear mutable layers
     const secG   = document.getElementById("tl-sections");
+    const actG   = document.getElementById("tl-activities");
     const axisG  = document.getElementById("tl-axis");
     const notesG = document.getElementById("tl-notes");
     secG.innerHTML = "";
+    actG.innerHTML = "";
     axisG.innerHTML = "";
     notesG.innerHTML = "";
 
@@ -944,6 +962,60 @@
           secG.appendChild(_svgEl("line", {
             x1, y1: TL.TRACK_Y, x2: x1, y2: TL.TRACK_Y + TL.TRACK_H,
             stroke: "#fff", "stroke-width": 1.5,
+          }));
+        }
+      });
+    }
+
+    // ── Activity track ─────────────────────────────────────────────────────
+    // Match sections named "Task 1" / "Task 2" (case-insensitive) to task_order 1/2.
+    // Activity segments are task-relative seconds; we scale them to fit within
+    // the section's x-span on the video timeline.
+    if (Object.keys(ACTIVITIES_BY_TASK_ORDER).length > 0) {
+      // Background strip for the activity track
+      actG.appendChild(_svgEl("rect", {
+        x: 0, y: TL.ACT_TRACK_Y, width, height: TL.ACT_TRACK_H,
+        fill: "#f3f4f6", rx: 0,
+      }));
+
+      const taskOrderForSection = (name) => {
+        if (/^task\s*1$/i.test(name)) return 1;
+        if (/^task\s*2$/i.test(name)) return 2;
+        return null;
+      };
+
+      _sections.forEach((sec, i) => {
+        const taskOrder = taskOrderForSection(sec.name);
+        if (taskOrder === null) return;
+        const segments = ACTIVITIES_BY_TASK_ORDER[taskOrder];
+        if (!segments || segments.length === 0) return;
+
+        // x-span of this section on the video timeline
+        const secX1 = _tToX(sec.start_seconds, duration, width);
+        const secX2 = _sections[i + 1]
+          ? _tToX(_sections[i + 1].start_seconds, duration, width)
+          : width;
+        const secW = Math.max(1, secX2 - secX1);
+
+        // Duration of the task in task-relative seconds (last segment end)
+        const taskDuration = segments[segments.length - 1].end_seconds;
+        if (!taskDuration) return;
+
+        // Clip to section bounds
+        const clipId = `tl-act-clip-${sec.id}`;
+        const cp = _svgEl("clipPath", { id: clipId });
+        cp.appendChild(_svgEl("rect", { x: secX1, y: TL.ACT_TRACK_Y, width: secW, height: TL.ACT_TRACK_H }));
+        actG.appendChild(cp);
+
+        for (const seg of segments) {
+          if (!seg.category || !ACTIVITY_COLORS[seg.category]) continue;
+          const sx1 = secX1 + (seg.start_seconds / taskDuration) * secW;
+          const sx2 = secX1 + (seg.end_seconds   / taskDuration) * secW;
+          const sw  = Math.max(0.5, sx2 - sx1);
+          actG.appendChild(_svgEl("rect", {
+            x: sx1, y: TL.ACT_TRACK_Y, width: sw, height: TL.ACT_TRACK_H,
+            fill: ACTIVITY_COLORS[seg.category], "clip-path": `url(#${clipId})`,
+            style: "pointer-events:none",
           }));
         }
       });

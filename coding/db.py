@@ -80,3 +80,20 @@ def _init_schema(db: sqlite_utils.Database) -> None:
         }, pk="id", not_null={"pid", "col_id"},
            foreign_keys=[("col_id", "sheet_columns", "id")])
         db["sheet_cells"].create_index(["pid", "col_id"], unique=True)
+
+    if "activities" not in db.table_names():
+        # Interaction-category timeline segments exported from the notebook.
+        # start_seconds / end_seconds are relative to task start time.
+        # task_order: 1 = first task the participant did, 2 = second.
+        db["activities"].create({
+            "id": int,
+            "pid": str,
+            "task": str,
+            "condition": str,
+            "task_order": int,
+            "start_seconds": float,
+            "end_seconds": float,
+            "category": str,  # read_code | edit_code | read_readme | terminal | exec_inspect
+        }, pk="id", not_null={"pid", "task", "condition", "task_order",
+                               "start_seconds", "end_seconds", "category"})
+        db["activities"].create_index(["pid"])

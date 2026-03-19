@@ -174,7 +174,14 @@ def session(pid: str):
 
     rows = _merge_rows(utterances, sections, notes)
 
-    return render_template("session.html", pid=pid, rows=rows, sections=sections, notes=notes)
+    # Load activity timeline segments if available (exported from notebook)
+    activities_by_task_order: dict[int, list] = {}
+    if "activities" in db.table_names():
+        for row in db["activities"].rows_where("pid = ?", [pid], order_by="task_order, start_seconds"):
+            activities_by_task_order.setdefault(row["task_order"], []).append(row)
+
+    return render_template("session.html", pid=pid, rows=rows, sections=sections, notes=notes,
+                           activities_by_task_order=activities_by_task_order)
 
 
 @bp.get("/video/<pid>")
