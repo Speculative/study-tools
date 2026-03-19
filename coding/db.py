@@ -81,6 +81,9 @@ def _init_schema(db: sqlite_utils.Database) -> None:
            foreign_keys=[("col_id", "sheet_columns", "id")])
         db["sheet_cells"].create_index(["pid", "col_id"], unique=True)
 
+    if "hidden" not in db["notes"].columns_dict:
+        db.execute("ALTER TABLE notes ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+
     if "activities" not in db.table_names():
         # Interaction-category timeline segments exported from the notebook.
         # start_seconds / end_seconds are relative to task start time.

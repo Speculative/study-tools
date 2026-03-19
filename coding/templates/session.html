@@ -182,6 +182,101 @@
   // ---------------------------------------------------------------------------
   const _collapsed = new Set();
 
+  // ---------------------------------------------------------------------------
+  // Focus section — zoom transcript + timeline to a single section
+  // ---------------------------------------------------------------------------
+  // _focusedSection: null | { id: string|null, name: string, startSeconds: number, endSeconds: number }
+  // id is null for the implicit "Start" section (utterances before first real section)
+  let _focusedSection = null;
+
+  function _getSectionWindow(sectionId) {
+    // Returns { startSeconds, endSeconds } for the given section id.
+    // sectionId === null means the implicit "Start" section (before first real section).
+    const duration = _tlDuration();
+    if (sectionId === null) {
+      // Implicit start: from 0 to the first section's start
+      const firstSec = _sections.length > 0 ? _sections[0] : null;
+      return { startSeconds: 0, endSeconds: firstSec ? firstSec.start_seconds : duration };
+    }
+    const idx = _sections.findIndex(s => String(s.id) === String(sectionId));
+    if (idx === -1) return null;
+    const sec = _sections[idx];
+    const next = _sections[idx + 1];
+    return {
+      startSeconds: sec.start_seconds,
+      endSeconds: next ? next.start_seconds : duration,
+    };
+  }
+
+  function focusSection(sectionId, sectionName) {
+    const win = _getSectionWindow(sectionId);
+    if (!win) return;
+    _focusedSection = { id: sectionId, name: sectionName, startSeconds: win.startSeconds, endSeconds: win.endSeconds };
+    _applyFocusToTranscript();
+    renderTimeline();
+  }
+
+  function unfocusSection() {
+    _focusedSection = null;
+    _applyFocusToTranscript();
+    renderTimeline();
+  }
+
+  function _applyFocusToTranscript() {
+    const tbody = document.getElementById("transcript-body");
+    if (!tbody) return;
+
+    if (!_focusedSection) {
+      // Show everything (respect collapse state)
+      for (const row of tbody.querySelectorAll("tr")) {
+        row.style.display = "";
+      }
+      // Re-apply collapsed state
+      for (const secId of _collapsed) {
+        document.querySelectorAll(`tr[data-section-id="${secId}"][data-start]`).forEach(r => {
+          r.style.display = "none";
+        });
+      }
+      // Remove focus banner if present
+      const banner = document.getElementById("focus-banner");
+      if (banner) banner.remove();
+      return;
+    }
+
+    const focusedId = _focusedSection.id; // null for implicit "Start"
+
+    // Add or update focus banner
+    let banner = document.getElementById("focus-banner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.id = "focus-banner";
+      banner.style.cssText = "position:sticky; top:0; z-index:10; background:#3730a3; color:#e0e7ff; padding:4px 10px; font-size:0.8rem; font-weight:600; display:flex; justify-content:space-between; align-items:center; cursor:pointer;";
+      banner.innerHTML = `<span></span><span style="font-size:0.75rem; opacity:0.8;">double-click to exit focus</span>`;
+      banner.addEventListener("dblclick", unfocusSection);
+      const scroller = document.getElementById("transcript-scroll");
+      if (scroller) scroller.prepend(banner);
+    }
+    banner.querySelector("span").textContent = `Focus: ${_focusedSection.name}`;
+
+    for (const row of tbody.querySelectorAll("tr")) {
+      if (row.classList.contains("section-header")) {
+        const rawRowSecId = row.getAttribute("data-section-id");
+        const rowSecId = rawRowSecId === "" ? null : rawRowSecId;
+        const isFocused = String(rowSecId) === String(focusedId);
+        row.style.display = isFocused ? "" : "none";
+      } else if (row.hasAttribute("data-start")) {
+        const rawRowSecId = row.getAttribute("data-section-id");
+        const rowSecId = rawRowSecId === "" ? null : rawRowSecId;
+        const inFocused = String(rowSecId) === String(focusedId);
+        row.style.display = inFocused ? "" : "none";
+      } else if (row.classList.contains("note-row")) {
+        const noteStart = parseFloat(row.getAttribute("data-note-start") || "0");
+        const inFocused = noteStart >= _focusedSection.startSeconds && noteStart < _focusedSection.endSeconds;
+        row.style.display = inFocused ? "" : "none";
+      }
+    }
+  }
+
   function setSectionCollapsed(secId, collapsed) {
     if (collapsed) _collapsed.add(secId); else _collapsed.delete(secId);
     const header = document.querySelector(`.section-header[data-section-id="${secId}"]`);
@@ -272,6 +367,23 @@
   // Transcript body: click delegation for seek, collapse, delete
   // ---------------------------------------------------------------------------
   function attachTranscriptHandlers() {
+    document.getElementById("transcript-body").addEventListener("dblclick", (e) => {
+      const header = e.target.closest(".section-header");
+      if (header) {
+        e.stopPropagation();
+        const rawSecId = header.getAttribute("data-section-id");
+        const secId = rawSecId === "" ? null : rawSecId;
+        if (_focusedSection && String(_focusedSection.id) === String(secId)) {
+          unfocusSection();
+        } else {
+          const tdColspan = header.querySelector("td[colspan]");
+          const name = tdColspan ? tdColspan.textContent.trim().replace(/^[▼▶]\s*/, "").replace(/\s*✕\s*$/, "").trim() : "Section";
+          focusSection(secId, name);
+        }
+        return;
+      }
+    });
+
     document.getElementById("transcript-body").addEventListener("click", (e) => {
       const noteDelBtn = e.target.closest(".note-delete-btn");
       if (noteDelBtn) {
@@ -459,6 +571,35 @@
         row.setAttribute("data-section-id", curSecId);
       }
     }
+    _ensureImplicitStartHeader();
+  }
+
+  function _ensureImplicitStartHeader() {
+    // If there are utterances before the first real section, inject an implicit
+    // "Start" section header so users can double-click to focus it.
+    const tbody = document.getElementById("transcript-body");
+    if (!tbody) return;
+
+    // Remove any existing implicit start header
+    const existing = tbody.querySelector(".section-header-implicit");
+    if (existing) existing.remove();
+
+    // Check if any utterance has an empty section id
+    const hasPreSectionRows = Array.from(tbody.querySelectorAll("tr[data-start]"))
+      .some(r => !r.getAttribute("data-section-id"));
+    if (!hasPreSectionRows) return;
+
+    const tr = document.createElement("tr");
+    tr.className = "section-header section-header-implicit";
+    tr.setAttribute("data-section-id", "");
+    tr.setAttribute("data-section-start", "0");
+    tr.style.cssText = "background:#f0f4ff; cursor:pointer; border-top:2px solid #c7d2fe;";
+    tr.innerHTML = `
+      <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; font-size:0.8rem;">0:00</td>
+      <td colspan="2" style="padding:5px 8px; font-weight:600; color:#3730a3;">
+        <span class="section-toggle" style="margin-right:4px; font-size:0.75rem;">▼</span>Start
+      </td>`;
+    tbody.prepend(tr);
   }
 
 
@@ -863,6 +1004,12 @@
 
   function _tToX(t, duration, width) {
     if (!duration) return 0;
+    if (_focusedSection) {
+      const { startSeconds, endSeconds } = _focusedSection;
+      const focusDur = endSeconds - startSeconds;
+      if (!focusDur) return 0;
+      return ((t - startSeconds) / focusDur) * width;
+    }
     return (t / duration) * width;
   }
 
@@ -914,18 +1061,38 @@
       return;
     }
 
+    // ── Focus indicator ────────────────────────────────────────────────────
+    if (_focusedSection) {
+      const focusLabel = _svgEl("text", {
+        x: width / 2, y: TL.TRACK_Y - 6,
+        "font-size": 9, fill: "#3730a3", "text-anchor": "middle",
+        style: "pointer-events:none; user-select:none; font-weight:600;",
+      });
+      focusLabel.textContent = `Focus: ${_focusedSection.name}  ·  double-click to exit`;
+      secG.appendChild(focusLabel);
+    }
+
     // ── Section track ──────────────────────────────────────────────────────
-    if (_sections.length === 0) {
+    // Build the render list: prepend an implicit "Start" section if the first
+    // real section doesn't begin at t=0.
+    const _hasPreSectionRows = Array.from(
+      document.querySelectorAll("#transcript-body tr[data-start]")
+    ).some(r => !r.getAttribute("data-section-id"));
+    const _renderSections = (_sections.length > 0 && (_sections[0].start_seconds > 0 || _hasPreSectionRows))
+      ? [{ id: null, name: "Start", start_seconds: 0, _implicit: true }, ..._sections]
+      : _sections;
+
+    if (_renderSections.length === 0) {
       // Single unsectioned bar
       secG.appendChild(_svgEl("rect", {
         x: 0, y: TL.TRACK_Y, width, height: TL.TRACK_H,
         fill: "#e5e7eb", rx: 3,
       }));
     } else {
-      _sections.forEach((sec, i) => {
+      _renderSections.forEach((sec, i) => {
         const x1 = _tToX(sec.start_seconds, duration, width);
-        const x2 = _sections[i + 1]
-          ? _tToX(_sections[i + 1].start_seconds, duration, width)
+        const x2 = _renderSections[i + 1]
+          ? _tToX(_renderSections[i + 1].start_seconds, duration, width)
           : width;
         const w  = Math.max(1, x2 - x1);
         const color = TL_SECTION_COLORS[i % TL_SECTION_COLORS.length];
@@ -940,11 +1107,19 @@
           e.stopPropagation();
           seekTo(sec.start_seconds);
         });
+        rect.addEventListener("dblclick", (e) => {
+          e.stopPropagation();
+          if (_focusedSection && _focusedSection.id === sec.id) {
+            unfocusSection();
+          } else {
+            focusSection(sec.id, sec.name);
+          }
+        });
         secG.appendChild(rect);
 
         // Label — only if band is wide enough; clip to band width
         if (w > 24) {
-          const clipId = `tl-sec-clip-${sec.id}`;
+          const clipId = `tl-sec-clip-${sec.id ?? "start"}`;
           const cp = _svgEl("clipPath", { id: clipId });
           cp.appendChild(_svgEl("rect", { x: x1 + 1, y: TL.TRACK_Y, width: w - 2, height: TL.TRACK_H }));
           secG.appendChild(cp);
@@ -1023,13 +1198,16 @@
 
     // ── Time axis ──────────────────────────────────────────────────────────
     // Pick a reasonable tick interval
+    const axisStart = _focusedSection ? _focusedSection.startSeconds : 0;
+    const axisEnd   = _focusedSection ? _focusedSection.endSeconds   : duration;
+    const axisDur   = axisEnd - axisStart;
     const targetTicks = Math.min(12, Math.max(4, Math.floor(width / 80)));
-    const rawInterval = duration / targetTicks;
+    const rawInterval = axisDur / targetTicks;
     // Round to nice values: 5, 10, 15, 30, 60, 120, 300, 600 …
     const niceIntervals = [5, 10, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600];
     const interval = niceIntervals.find(n => n >= rawInterval) ?? 3600;
 
-    for (let t = 0; t <= duration; t += interval) {
+    for (let t = axisStart; t <= axisEnd; t += interval) {
       const x = _tToX(t, duration, width);
       axisG.appendChild(_svgEl("line", {
         x1: x, y1: TL.TRACK_Y + TL.TRACK_H, x2: x, y2: TL.AXIS_Y - 2,
@@ -1055,7 +1233,11 @@
       return laneEndX.length - 1;
     }
 
-    _notes.forEach(note => {
+    const visibleNotes = _focusedSection
+      ? _notes.filter(n => n.start_seconds >= _focusedSection.startSeconds && n.start_seconds < _focusedSection.endSeconds)
+      : _notes;
+
+    visibleNotes.forEach(note => {
       const isRange = note.end_seconds != null;
       const x1 = _tToX(note.start_seconds, duration, width);
       const x2 = isRange ? _tToX(note.end_seconds, duration, width) : x1;
@@ -1136,7 +1318,20 @@
     container.addEventListener("click", (e) => {
       const rect = container.getBoundingClientRect();
       const frac = (e.clientX - rect.left) / rect.width;
-      seekTo(Math.max(0, Math.min(1, frac)) * (_tlDuration() || 0));
+      if (_focusedSection) {
+        const { startSeconds, endSeconds } = _focusedSection;
+        seekTo(startSeconds + Math.max(0, Math.min(1, frac)) * (endSeconds - startSeconds));
+      } else {
+        seekTo(Math.max(0, Math.min(1, frac)) * (_tlDuration() || 0));
+      }
+    });
+
+    // Double-click on timeline to unfocus
+    container.addEventListener("dblclick", (e) => {
+      if (_focusedSection) {
+        e.stopPropagation();
+        unfocusSection();
+      }
     });
 
     // Re-render when container is resized
@@ -1147,6 +1342,7 @@
   // Init
   // ---------------------------------------------------------------------------
   function init() {
+    _ensureImplicitStartHeader();
     attachTranscriptHandlers();
     attachHotkeyHandlers();
     attachResizers();

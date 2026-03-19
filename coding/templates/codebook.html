@@ -12,23 +12,62 @@
     class="code-bin rounded-lg border border-gray-200 bg-white shadow-sm"
     data-code-id="uncategorized"
   >
-    <div class="px-4 py-2 border-b border-gray-100 bg-gray-50 rounded-t-lg flex items-center gap-2">
+    <div
+      class="bin-header px-4 py-2 border-b border-gray-100 bg-gray-50 rounded-t-lg flex items-center gap-2 cursor-pointer select-none"
+      onclick="toggleBin('uncategorized')"
+    >
+      <span class="bin-chevron text-gray-400 text-xs">▼</span>
       <span class="font-semibold text-gray-600 text-sm uppercase tracking-wide">Uncategorized</span>
       <span class="text-xs text-gray-400 note-count">({{ uncategorized|length }})</span>
+      <span class="bin-preview ml-2 text-xs text-gray-400 truncate hidden"></span>
     </div>
-    <div class="note-list px-4 py-2 flex flex-wrap gap-2 min-h-10">
-      {% for note in uncategorized %}
-      <div
-        class="note-chip border border-gray-200 bg-gray-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none"
-        draggable="true"
-        data-note-id="{{ note.id }}"
-        data-pid="{{ note.pid }}"
-        data-start="{{ note.start_seconds }}"
-        data-end="{{ note.end_seconds if note.end_seconds is not none else '' }}"
-        data-text="{{ note.text }}"
-      >
-        <span class="text-gray-400 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
-        ><span class="text-gray-800">{{ note.text }}</span>
+    <!-- Hidden sentinel note-list so drag-drop always has a target -->
+    <div class="note-list hidden" data-code-id="uncategorized" style="display:none"></div>
+    <!-- Expandable body -->
+    <div class="bin-body px-4 py-3 flex flex-col gap-3">
+      {% for group in uncategorized_groups %}
+      <div class="pid-group" data-pid="{{ group.pid }}">
+        <div
+          class="pid-header flex items-center gap-1.5 cursor-pointer select-none mb-1.5"
+          onclick="togglePidGroup(this)"
+        >
+          <span class="pid-chevron text-gray-300 text-xs">▼</span>
+          <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{{ group.pid }}</span>
+          <span class="text-xs text-gray-300 pid-count">({{ group.total }})</span>
+        </div>
+        <div class="pid-body flex flex-col gap-2 pl-3">
+          {% for sec in group.sections %}
+          <div class="sec-group" data-sec="{{ sec.name }}">
+            {% if sec.name %}
+            <div
+              class="sec-header flex items-center gap-1.5 cursor-pointer select-none mb-1"
+              onclick="toggleSecGroup(this)"
+            >
+              <span class="sec-chevron text-gray-300 text-xs">▼</span>
+              <span class="text-xs text-gray-400 italic">{{ sec.name }}</span>
+              <span class="text-xs text-gray-300 sec-count">({{ sec.notes|length }})</span>
+            </div>
+            {% endif %}
+            <div class="sec-body flex flex-wrap gap-2 {% if sec.name %}pl-3{% endif %}">
+              {% for note in sec.notes %}
+              <div
+                class="note-chip border border-gray-200 bg-gray-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none"
+                draggable="true"
+                data-note-id="{{ note.id }}"
+                data-pid="{{ note.pid }}"
+                data-start="{{ note.start_seconds }}"
+                data-end="{{ note.end_seconds if note.end_seconds is not none else '' }}"
+                data-text="{{ note.text }}"
+              >
+                <span class="text-gray-400 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
+                ><span class="text-gray-800">{{ note.text }}</span
+                ><button class="hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none" onclick="event.stopPropagation(); hideNote(this)" title="Hide">×</button>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
       </div>
       {% endfor %}
     </div>
@@ -41,20 +80,25 @@
     class="code-bin rounded-lg border border-blue-200 bg-white shadow-sm"
     data-code-id="{{ code.id }}"
   >
-    <div class="px-4 py-2 border-b border-blue-100 bg-blue-50 rounded-t-lg flex items-center gap-2">
+    <div
+      class="bin-header px-4 py-2 border-b border-blue-100 bg-blue-50 rounded-t-lg flex items-center gap-2 cursor-pointer select-none"
+      onclick="toggleBin('{{ code.id }}')"
+    >
+      <span class="bin-chevron text-blue-300 text-xs">▼</span>
       <span
-        class="code-name font-semibold text-blue-800 text-sm cursor-pointer"
+        class="code-name font-semibold text-blue-800 text-sm"
         title="Double-click to rename"
-        ondblclick="startRenameCode(this, {{ code.id }})"
+        ondblclick="event.stopPropagation(); startRenameCode(this, {{ code.id }})"
       >{{ code.name }}</span>
       <span class="text-xs text-blue-300 note-count">({{ code.notes|length }})</span>
+      <span class="bin-preview ml-2 text-xs text-blue-300 truncate hidden"></span>
       <button
-        class="ml-auto text-red-300 hover:text-red-500 text-xs"
-        onclick="deleteCode({{ code.id }})"
+        class="ml-auto text-red-300 hover:text-red-500 text-xs flex-shrink-0"
+        onclick="event.stopPropagation(); deleteCode({{ code.id }})"
         title="Delete code"
       >✕</button>
     </div>
-    <div class="note-list px-4 py-2 flex flex-wrap gap-2 min-h-10 relative">
+    <div class="note-list bin-body px-4 py-2 flex flex-wrap gap-2 min-h-10 relative">
       {% for note in code.notes %}
       <div
         class="note-chip border border-blue-200 bg-blue-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none"
@@ -66,12 +110,47 @@
         data-text="{{ note.text }}"
       >
         <span class="text-blue-300 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
-        ><span class="text-gray-800">{{ note.text }}</span>
+        ><span class="text-gray-800">{{ note.text }}</span
+        ><button class="hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none" onclick="event.stopPropagation(); hideNote(this)" title="Hide">×</button>
       </div>
       {% endfor %}
     </div>
   </div>
   {% endfor %}
+
+  <!-- Hidden notes (collapsed by default) -->
+  <div id="bin-hidden" class="rounded-lg border border-gray-200 bg-white shadow-sm">
+    <div
+      class="px-4 py-2 border-b border-gray-100 bg-gray-50 rounded-t-lg flex items-center gap-2 cursor-pointer select-none"
+      onclick="toggleHiddenBin()"
+    >
+      <span id="hidden-chevron" class="text-gray-400 text-xs">▶</span>
+      <span class="font-semibold text-gray-400 text-sm uppercase tracking-wide">Hidden</span>
+      <span class="text-xs text-gray-400 hidden-note-count">({{ hidden_notes|length }})</span>
+    </div>
+    <div id="hidden-note-list" class="hidden px-4 py-2 flex flex-wrap gap-2 min-h-10">
+      {% for note in hidden_notes %}
+      <div
+        class="note-chip note-chip-hidden border border-gray-200 bg-gray-100 rounded px-2.5 py-1.5 text-sm cursor-grab select-none opacity-50"
+        draggable="true"
+        data-note-id="{{ note.id }}"
+        data-pid="{{ note.pid }}"
+        data-start="{{ note.start_seconds }}"
+        data-end="{{ note.end_seconds if note.end_seconds is not none else '' }}"
+        data-text="{{ note.text }}"
+        data-hidden="1"
+      >
+        <span class="text-gray-400 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
+        ><span class="text-gray-500">{{ note.text }}</span>
+        <button
+          class="ml-1 text-gray-400 hover:text-blue-500 text-xs"
+          onclick="event.stopPropagation(); unhideNote(this)"
+          title="Unhide"
+        >↩</button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
 
   <!-- New code -->
   <div id="new-code-collapsed" class="rounded-lg border border-dashed border-gray-300 px-4 py-2">
@@ -120,7 +199,8 @@
 
 <style>
   .note-chip.dragging { opacity: 0.35; }
-  .code-bin.drag-over > .note-list { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
+  .code-bin.drag-over .note-list:not([style*="display:none"]) { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
+  .code-bin.drag-over .bin-header { background-color: #eff6ff; }
 </style>
 
 <script>
@@ -142,9 +222,11 @@ function makeChip(noteId, pid, startSeconds, ts, text, inCode) {
   d.dataset.noteId = String(noteId);
   d.dataset.pid = pid;
   d.dataset.start = String(startSeconds);
+  const hideBtnClass = inCode ? "hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none" : "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
   d.innerHTML =
     `<span class="${metaClass(inCode)}">${escHtml(pid)}·${escHtml(ts)} </span>` +
-    `<span class="text-gray-800">${escHtml(text)}</span>`;
+    `<span class="text-gray-800">${escHtml(text)}</span>` +
+    `<button class="${hideBtnClass}" onclick="event.stopPropagation(); hideNote(this)" title="Hide">×</button>`;
   return d;
 }
 
@@ -195,6 +277,16 @@ document.addEventListener("dragover", e => {
     if (b !== bin) b.classList.remove("drag-over");
   });
   bin.classList.add("drag-over");
+
+  const binBody = bin.querySelector(".bin-body");
+  const collapsed = binBody && binBody.classList.contains("hidden");
+
+  // For collapsed bins, or uncategorized (which has nested sub-groups), just show intent
+  if (collapsed || bin.dataset.codeId === "uncategorized") {
+    BAR.classList.add("hidden");
+    _dropTarget = { codeId: bin.dataset.codeId, afterNoteId: null };
+    return;
+  }
 
   const list = bin.querySelector(".note-list");
   const chips = [...list.querySelectorAll(".note-chip")].filter(c => c !== _dragging.el);
@@ -311,12 +403,18 @@ document.addEventListener("drop", async e => {
 
   const toBin = document.querySelector(`.code-bin[data-code-id="${toCodeId}"]`);
   if (!toBin) return;
-  const toList = toBin.querySelector(".note-list");
   const inCode = toCodeId !== "uncategorized";
+  // For code bins .note-list is also .bin-body; for uncategorized use .bin-body for visual placement
+  const toList = inCode ? toBin.querySelector(".note-list") : toBin.querySelector(".bin-body");
 
   // Update chip styling
   chip.className = chipClass(inCode);
   chip.querySelector("span").className = metaClass(inCode);
+  // Update hide button color
+  const hbtn = chip.querySelector(".hide-btn");
+  if (hbtn) hbtn.className = inCode
+    ? "hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none"
+    : "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
 
   // Insert into correct position in DOM
   if (afterNoteId === null) {
@@ -382,6 +480,19 @@ document.addEventListener("drop", async e => {
 function updateCount(bin) {
   const n = bin.querySelectorAll(".note-chip").length;
   bin.querySelector(".note-count").textContent = `(${n})`;
+  updateBinPreview(bin);
+}
+
+function updateBinPreview(bin) {
+  const preview = bin.querySelector(".bin-preview");
+  if (!preview) return;
+  const chips = [...bin.querySelectorAll(".note-chip")];
+  if (chips.length === 0) { preview.textContent = ""; return; }
+  const samples = chips.slice(0, 2).map(c => {
+    const textEl = c.querySelectorAll("span")[1];
+    return textEl ? textEl.textContent.trim() : "";
+  }).filter(Boolean);
+  preview.textContent = samples.join(" · ") + (chips.length > 2 ? " …" : "");
 }
 
 // ---------------------------------------------------------------------------
@@ -423,18 +534,59 @@ function insertCodeBin(code) {
   bin.className = "code-bin rounded-lg border border-blue-200 bg-white shadow-sm";
   bin.dataset.codeId = String(code.id);
   bin.innerHTML = `
-    <div class="px-4 py-2 border-b border-blue-100 bg-blue-50 rounded-t-lg flex items-center gap-2">
-      <span
-        class="code-name font-semibold text-blue-800 text-sm cursor-pointer"
-        title="Double-click to rename"
-        ondblclick="startRenameCode(this, ${code.id})"
+    <div class="bin-header px-4 py-2 border-b border-blue-100 bg-blue-50 rounded-t-lg flex items-center gap-2 cursor-pointer select-none"
+         onclick="toggleBin('${code.id}')">
+      <span class="bin-chevron text-blue-300 text-xs">▼</span>
+      <span class="code-name font-semibold text-blue-800 text-sm"
+            title="Double-click to rename"
+            ondblclick="event.stopPropagation(); startRenameCode(this, ${code.id})"
       >${escHtml(code.name)}</span>
       <span class="text-xs text-blue-300 note-count">(0)</span>
-      <button class="ml-auto text-red-300 hover:text-red-500 text-xs" onclick="deleteCode(${code.id})" title="Delete code">✕</button>
+      <span class="bin-preview ml-2 text-xs text-blue-300 truncate hidden"></span>
+      <button class="ml-auto text-red-300 hover:text-red-500 text-xs flex-shrink-0"
+              onclick="event.stopPropagation(); deleteCode(${code.id})" title="Delete code">✕</button>
     </div>
-    <div class="note-list px-4 py-2 flex flex-wrap gap-2 min-h-10 relative"></div>
+    <div class="note-list bin-body px-4 py-2 flex flex-wrap gap-2 min-h-10 relative"></div>
   `;
   document.getElementById("codebook").insertBefore(bin, anchor);
+}
+
+// ---------------------------------------------------------------------------
+// Collapse / expand bins and sub-groups
+// ---------------------------------------------------------------------------
+function toggleBin(codeId) {
+  const bin = document.getElementById(`bin-${codeId}`) ||
+              document.querySelector(`.code-bin[data-code-id="${codeId}"]`);
+  if (!bin) return;
+  const body = bin.querySelector(".bin-body");
+  const chevron = bin.querySelector(".bin-chevron");
+  const preview = bin.querySelector(".bin-preview");
+  const collapsed = body.classList.toggle("hidden");
+  chevron.textContent = collapsed ? "▶" : "▼";
+  if (preview) {
+    if (collapsed) {
+      updateBinPreview(bin);
+      preview.classList.remove("hidden");
+    } else {
+      preview.classList.add("hidden");
+    }
+  }
+}
+
+function togglePidGroup(headerEl) {
+  const group = headerEl.closest(".pid-group");
+  const body = group.querySelector(".pid-body");
+  const chevron = headerEl.querySelector(".pid-chevron");
+  const collapsed = body.classList.toggle("hidden");
+  chevron.textContent = collapsed ? "▶" : "▼";
+}
+
+function toggleSecGroup(headerEl) {
+  const group = headerEl.closest(".sec-group");
+  const body = group.querySelector(".sec-body");
+  const chevron = headerEl.querySelector(".sec-chevron");
+  const collapsed = body.classList.toggle("hidden");
+  chevron.textContent = collapsed ? "▶" : "▼";
 }
 
 // ---------------------------------------------------------------------------
@@ -484,15 +636,120 @@ async function deleteCode(codeId) {
   const res = await fetch(`/api/codes/${codeId}`, { method: "DELETE" });
   if (!res.ok) return;
   const bin = document.getElementById(`bin-${codeId}`);
-  const uncatList = document.querySelector("#bin-uncategorized .note-list");
+  const uncatBody = document.querySelector("#bin-uncategorized .bin-body");
   bin.querySelectorAll(".note-chip").forEach(chip => {
     chip.className = chipClass(false);
     chip.querySelector("span").className = metaClass(false);
-    uncatList.appendChild(chip);
+    // Remove hide button if present, re-add gray one
+    chip.querySelector(".hide-btn")?.remove();
+    const hb = document.createElement("button");
+    hb.className = "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
+    hb.title = "Hide"; hb.textContent = "×";
+    hb.onclick = e => { e.stopPropagation(); hideNote(hb); };
+    chip.appendChild(hb);
+    uncatBody.appendChild(chip);
   });
   updateCount(document.getElementById("bin-uncategorized"));
   bin.remove();
 }
+
+// ---------------------------------------------------------------------------
+// Hide / unhide
+// ---------------------------------------------------------------------------
+async function hideNote(btn) {
+  const chip = btn.closest(".note-chip");
+  const noteId = +chip.dataset.noteId;
+
+  // Count how many visible bins currently hold this note
+  const allChips = [...document.querySelectorAll(`.note-chip[data-note-id="${noteId}"]`)];
+  const otherChips = allChips.filter(c => c !== chip);
+
+  if (otherChips.length > 0) {
+    // Note exists elsewhere — just remove this copy (no DB change needed)
+    const bin = chip.closest(".code-bin") || document.getElementById("bin-uncategorized");
+    chip.remove();
+    if (bin) updateCount(bin);
+    return;
+  }
+
+  // Last occurrence — mark hidden in DB and move to Hidden section
+  await fetch(`/api/notes/${noteId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hidden: true }),
+  });
+
+  const bin = chip.closest(".code-bin") || document.getElementById("bin-uncategorized");
+  chip.remove();
+  if (bin) updateCount(bin);
+
+  // Restyle and move chip into hidden section
+  const hiddenList = document.getElementById("hidden-note-list");
+  chip.className = "note-chip note-chip-hidden border border-gray-200 bg-gray-100 rounded px-2.5 py-1.5 text-sm cursor-grab select-none opacity-50";
+  chip.dataset.hidden = "1";
+
+  btn.remove();
+  const unhideBtn = document.createElement("button");
+  unhideBtn.className = "ml-1 text-gray-400 hover:text-blue-500 text-xs";
+  unhideBtn.title = "Unhide";
+  unhideBtn.textContent = "↩";
+  unhideBtn.onclick = e => { e.stopPropagation(); unhideNote(unhideBtn); };
+  chip.querySelector("span").className = "text-gray-400 text-xs mr-1";
+  const textSpan = chip.querySelectorAll("span")[1];
+  if (textSpan) textSpan.className = "text-gray-500";
+  chip.appendChild(unhideBtn);
+  hiddenList.appendChild(chip);
+
+  updateHiddenCount();
+}
+
+async function unhideNote(btn) {
+  const chip = btn.closest(".note-chip");
+  const noteId = +chip.dataset.noteId;
+
+  await fetch(`/api/notes/${noteId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hidden: false }),
+  });
+
+  // Move chip to uncategorized
+  chip.className = chipClass(false);
+  chip.dataset.hidden = "0";
+  btn.remove();
+  const hideBtn = document.createElement("button");
+  hideBtn.className = "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
+  hideBtn.title = "Hide";
+  hideBtn.textContent = "×";
+  hideBtn.onclick = e => { e.stopPropagation(); hideNote(hideBtn); };
+  chip.querySelector("span").className = metaClass(false);
+  const textSpan = chip.querySelectorAll("span")[1];
+  if (textSpan) textSpan.className = "text-gray-800";
+  chip.appendChild(hideBtn);
+
+  chip.remove();
+  const uncatBody = document.querySelector("#bin-uncategorized .bin-body");
+  uncatBody.appendChild(chip);
+  updateCount(document.getElementById("bin-uncategorized"));
+  updateHiddenCount();
+}
+
+function updateHiddenCount() {
+  const n = document.getElementById("hidden-note-list").querySelectorAll(".note-chip").length;
+  document.querySelector(".hidden-note-count").textContent = `(${n})`;
+}
+
+function toggleHiddenBin() {
+  const list = document.getElementById("hidden-note-list");
+  const chevron = document.getElementById("hidden-chevron");
+  const collapsed = list.classList.toggle("hidden");
+  chevron.textContent = collapsed ? "▶" : "▼";
+}
+
+// ---------------------------------------------------------------------------
+// Init previews
+// ---------------------------------------------------------------------------
+document.querySelectorAll(".code-bin").forEach(bin => updateBinPreview(bin));
 
 // ---------------------------------------------------------------------------
 // Util

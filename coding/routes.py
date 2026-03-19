@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
+from collections import Counter, OrderedDict
 from pathlib import Path
 
 from flask import Blueprint, abort, jsonify, render_template, request, send_file
@@ -264,12 +264,19 @@ def add_note(pid: str):
 @bp.patch("/api/notes/<int:note_id>")
 def update_note(note_id: int):
     payload = request.get_json(silent=True) or {}
-    text = payload.get("text", "").strip()
-    if not text:
-        return jsonify({"error": "text required"}), 400
+    updates = {}
+    if "text" in payload:
+        text = payload["text"].strip()
+        if not text:
+            return jsonify({"error": "text required"}), 400
+        updates["text"] = text
+    if "hidden" in payload:
+        updates["hidden"] = 1 if payload["hidden"] else 0
+    if not updates:
+        return jsonify({"error": "nothing to update"}), 400
     db = get_db()
-    db["notes"].update(note_id, {"text": text})
-    return jsonify({"text": text})
+    db["notes"].update(note_id, updates)
+    return jsonify(updates)
 
 
 @bp.delete("/api/notes/<int:note_id>")
@@ -297,23 +304,67 @@ def codebook():
 
     # All notes
     all_notes = list(db.execute(
-        "SELECT id, pid, text, start_seconds, end_seconds FROM notes ORDER BY start_seconds"
+        "SELECT id, pid, text, start_seconds, end_seconds, hidden FROM notes ORDER BY start_seconds"
     ).fetchall())
-    all_notes = [{"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3], "end_seconds": r[4]} for r in all_notes]
+    all_notes = [{"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3], "end_seconds": r[4], "hidden": bool(r[5])} for r in all_notes]
 
-    uncategorized = [n for n in all_notes if n["id"] not in coded_note_ids]
+    hidden_notes = [n for n in all_notes if n["hidden"]]
+    uncategorized = [n for n in all_notes if not n["hidden"] and n["id"] not in coded_note_ids]
+
+    # Group uncategorized notes by pid, then by section within each pid.
+    # sections_by_pid: pid -> list of {id, name, start_seconds} sorted by start_seconds
+    all_sections = list(db.execute(
+        "SELECT id, pid, name, start_seconds FROM sections ORDER BY pid, start_seconds"
+    ).fetchall())
+    sections_by_pid: dict[str, list[dict]] = {}
+    for r in all_sections:
+        sections_by_pid.setdefault(r[1], []).append({"id": r[0], "name": r[2], "start_seconds": r[3]})
+
+    def _section_for_note(note: dict) -> str:
+        """Return section name for a note, or '' if before first section."""
+        pid_sections = sections_by_pid.get(note["pid"], [])
+        name = ""
+        for s in pid_sections:
+            if s["start_seconds"] <= note["start_seconds"]:
+                name = s["name"]
+            else:
+                break
+        return name
+
+    # Build: uncategorized_groups = [{pid, sections: [{name, notes:[]}]}]
+    pid_order: list[str] = []
+    pid_section_notes: dict[str, dict[str, list]] = {}  # pid -> section_name -> notes
+    for n in uncategorized:
+        pid = n["pid"]
+        sec = _section_for_note(n)
+        if pid not in pid_section_notes:
+            pid_order.append(pid)
+            pid_section_notes[pid] = OrderedDict()
+        if sec not in pid_section_notes[pid]:
+            pid_section_notes[pid][sec] = []
+        pid_section_notes[pid][sec].append(n)
+
+    uncategorized_groups = []
+    for pid in pid_order:
+        sections = [
+            {"name": sec_name, "notes": notes}
+            for sec_name, notes in pid_section_notes[pid].items()
+        ]
+        total = sum(len(s["notes"]) for s in sections)
+        uncategorized_groups.append({"pid": pid, "sections": sections, "total": total})
 
     # For each code, fetch its notes ordered by sort_order
     for c in code_list:
         c["notes"] = list(db.execute(
             "SELECT n.id, n.pid, n.text, n.start_seconds, n.end_seconds "
             "FROM notes n JOIN note_codes nc ON nc.note_id = n.id "
-            "WHERE nc.code_id = ? ORDER BY nc.sort_order, nc.id",
+            "WHERE nc.code_id = ? AND (n.hidden = 0 OR n.hidden IS NULL) ORDER BY nc.sort_order, nc.id",
             [c["id"]],
         ).fetchall())
         c["notes"] = [{"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3], "end_seconds": r[4]} for r in c["notes"]]
 
-    return render_template("codebook.html", codes=code_list, uncategorized=uncategorized)
+    return render_template("codebook.html", codes=code_list, uncategorized=uncategorized,
+                           uncategorized_groups=uncategorized_groups, hidden_notes=hidden_notes)
 
 
 # ---------------------------------------------------------------------------
