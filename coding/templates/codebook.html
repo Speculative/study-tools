@@ -1,10 +1,24 @@
 {% extends "base.html" %}
 {% block title %}Codebook{% endblock %}
-{% block content %}
+{% block body %}
+<style>html, body { overflow: hidden; height: 100%; margin: 0; }</style>
+<div class="flex flex-col h-screen overflow-hidden bg-gray-50 text-gray-900">
 
-<h1 class="text-2xl font-bold mb-6">Codebook</h1>
+  <!-- Top nav (matches base.html) -->
+  <header class="flex-shrink-0 px-4 py-3 flex items-center gap-6 border-b border-gray-200 bg-white">
+    <a href="/" class="text-xl font-semibold">Study Sessions</a>
+    <nav class="flex gap-4 text-sm font-medium text-gray-600">
+      <a href="/" class="hover:text-blue-700 transition-colors">Sessions</a>
+      <a href="/codebook" class="hover:text-blue-700 transition-colors">Codebook</a>
+      <a href="/sheet" class="hover:text-blue-700 transition-colors">Sheet</a>
+    </nav>
+  </header>
 
-<div id="codebook" class="flex flex-col gap-6 max-w-3xl">
+  <!-- Two-column split -->
+  <div id="split-container" class="flex flex-1 min-h-0 min-w-0 overflow-hidden">
+
+    <!-- Left column: Uncategorized + Hidden -->
+    <div id="left-col" class="flex flex-col gap-4 overflow-y-auto overflow-x-hidden p-4 min-w-0" style="width:50%">
 
   <!-- Uncategorized -->
   <div
@@ -20,6 +34,10 @@
       <span class="font-semibold text-gray-600 text-sm uppercase tracking-wide">Uncategorized</span>
       <span class="text-xs text-gray-400 note-count">({{ uncategorized|length }})</span>
       <span class="bin-preview ml-2 text-xs text-gray-400 truncate hidden"></span>
+      <div class="ml-auto flex gap-1" onclick="event.stopPropagation()">
+        <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllUncategorized(true)">collapse all</button>
+        <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllUncategorized(false)">expand all</button>
+      </div>
     </div>
     <!-- Hidden sentinel note-list so drag-drop always has a target -->
     <div class="note-list hidden" data-code-id="uncategorized" style="display:none"></div>
@@ -73,53 +91,8 @@
     </div>
   </div>
 
-  <!-- Named codes -->
-  {% for code in codes %}
-  <div
-    id="bin-{{ code.id }}"
-    class="code-bin rounded-lg border border-blue-200 bg-white shadow-sm"
-    data-code-id="{{ code.id }}"
-  >
-    <div
-      class="bin-header px-4 py-2 border-b border-blue-100 bg-blue-50 rounded-t-lg flex items-center gap-2 cursor-pointer select-none"
-      onclick="toggleBin('{{ code.id }}')"
-    >
-      <span class="bin-chevron text-blue-300 text-xs">▼</span>
-      <span
-        class="code-name font-semibold text-blue-800 text-sm"
-        title="Double-click to rename"
-        ondblclick="event.stopPropagation(); startRenameCode(this, {{ code.id }})"
-      >{{ code.name }}</span>
-      <span class="text-xs text-blue-300 note-count">({{ code.notes|length }})</span>
-      <span class="bin-preview ml-2 text-xs text-blue-300 truncate hidden"></span>
-      <button
-        class="ml-auto text-red-300 hover:text-red-500 text-xs flex-shrink-0"
-        onclick="event.stopPropagation(); deleteCode({{ code.id }})"
-        title="Delete code"
-      >✕</button>
-    </div>
-    <div class="note-list bin-body px-4 py-2 flex flex-wrap gap-2 min-h-10 relative">
-      {% for note in code.notes %}
-      <div
-        class="note-chip border border-blue-200 bg-blue-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none"
-        draggable="true"
-        data-note-id="{{ note.id }}"
-        data-pid="{{ note.pid }}"
-        data-start="{{ note.start_seconds }}"
-        data-end="{{ note.end_seconds if note.end_seconds is not none else '' }}"
-        data-text="{{ note.text }}"
-      >
-        <span class="text-blue-300 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
-        ><span class="text-gray-800">{{ note.text }}</span
-        ><button class="hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none" onclick="event.stopPropagation(); hideNote(this)" title="Hide">×</button>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endfor %}
-
-  <!-- Hidden notes (collapsed by default) -->
-  <div id="bin-hidden" class="rounded-lg border border-gray-200 bg-white shadow-sm">
+    <!-- Hidden notes (collapsed by default) -->
+    <div id="bin-hidden" class="rounded-lg border border-gray-200 bg-white shadow-sm">
     <div
       class="px-4 py-2 border-b border-gray-100 bg-gray-50 rounded-t-lg flex items-center gap-2 cursor-pointer select-none"
       onclick="toggleHiddenBin()"
@@ -152,28 +125,84 @@
     </div>
   </div>
 
-  <!-- New code -->
-  <div id="new-code-collapsed" class="rounded-lg border border-dashed border-gray-300 px-4 py-2">
-    <button
-      class="w-full text-left text-sm text-gray-400 hover:text-blue-600 font-medium transition-colors"
-      onclick="showNewCodeInput()"
-    >+ New code</button>
-  </div>
-  <div id="new-code-form" class="hidden rounded-lg border border-blue-300 bg-white px-4 py-3">
-    <input
-      id="new-code-input"
-      type="text"
-      class="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-      placeholder="Code name…"
-      onkeydown="handleNewCodeKey(event)"
-    />
-    <div class="flex gap-2 mt-2">
-      <button class="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700" onclick="submitNewCode()">Create</button>
-      <button class="text-xs text-gray-500 hover:text-gray-700" onclick="hideNewCodeInput()">Cancel</button>
-    </div>
-  </div>
+    </div><!-- /left-col -->
 
-</div>
+    <!-- Drag separator -->
+    <div id="col-separator" style="width:5px;cursor:col-resize;flex-shrink:0;" class="bg-gray-200 hover:bg-blue-300 active:bg-blue-400 transition-colors"></div>
+
+    <!-- Right column: named codes + new code -->
+    <div id="right-col" class="flex flex-col gap-4 overflow-y-auto overflow-x-hidden p-4 flex-1 min-w-0">
+
+      <!-- Named codes -->
+      {% for code in codes %}
+      <div
+        id="bin-{{ code.id }}"
+        class="code-bin rounded-lg border border-blue-200 bg-white shadow-sm"
+        data-code-id="{{ code.id }}"
+      >
+        <div
+          class="bin-header px-4 py-2 border-b border-blue-100 bg-blue-50 rounded-t-lg flex items-center gap-2 cursor-pointer select-none"
+          onclick="toggleBin('{{ code.id }}')"
+        >
+          <span class="bin-chevron text-blue-300 text-xs">▼</span>
+          <span
+            class="code-name font-semibold text-blue-800 text-sm"
+            title="Double-click to rename"
+            ondblclick="event.stopPropagation(); startRenameCode(this, {{ code.id }})"
+          >{{ code.name }}</span>
+          <span class="text-xs text-blue-300 note-count">({{ code.notes|length }})</span>
+          <span class="bin-preview ml-2 text-xs text-blue-300 truncate hidden"></span>
+          <button
+            class="ml-auto text-red-300 hover:text-red-500 text-xs flex-shrink-0"
+            onclick="event.stopPropagation(); deleteCode({{ code.id }})"
+            title="Delete code"
+          >✕</button>
+        </div>
+        <div class="note-list bin-body px-4 py-2 flex flex-wrap gap-2 min-h-10 relative">
+          {% for note in code.notes %}
+          <div
+            class="note-chip border border-blue-200 bg-blue-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none"
+            draggable="true"
+            data-note-id="{{ note.id }}"
+            data-pid="{{ note.pid }}"
+            data-start="{{ note.start_seconds }}"
+            data-end="{{ note.end_seconds if note.end_seconds is not none else '' }}"
+            data-text="{{ note.text }}"
+          >
+            <span class="text-blue-300 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
+            ><span class="text-gray-800">{{ note.text }}</span
+            ><button class="hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none" onclick="event.stopPropagation(); hideNote(this)" title="Hide">×</button>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+
+      <!-- New code -->
+      <div id="new-code-collapsed" class="rounded-lg border border-dashed border-gray-300 px-4 py-2">
+        <button
+          class="w-full text-left text-sm text-gray-400 hover:text-blue-600 font-medium transition-colors"
+          onclick="showNewCodeInput()"
+        >+ New code</button>
+      </div>
+      <div id="new-code-form" class="hidden rounded-lg border border-blue-300 bg-white px-4 py-3">
+        <input
+          id="new-code-input"
+          type="text"
+          class="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+          placeholder="Code name…"
+          onkeydown="handleNewCodeKey(event)"
+        />
+        <div class="flex gap-2 mt-2">
+          <button class="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700" onclick="submitNewCode()">Create</button>
+          <button class="text-xs text-gray-500 hover:text-gray-700" onclick="hideNewCodeInput()">Cancel</button>
+        </div>
+      </div>
+
+    </div><!-- /right-col -->
+
+  </div><!-- /split-container -->
+</div><!-- /page root -->
 
 <!-- Drop indicator bar (shared, moved around the DOM) -->
 <div id="drop-bar" class="hidden bg-blue-500 rounded pointer-events-none" style="position:absolute;width:2px;"></div>
@@ -194,6 +223,20 @@
       >✕ close</button>
     </div>
     <div id="lightbox-player-target" style="aspect-ratio:16/9;width:100%;"></div>
+    <div class="flex gap-2 items-start mt-1">
+      <textarea
+        id="lb-note-textarea"
+        rows="2"
+        class="flex-1 bg-white/10 text-white text-sm rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-white/40 placeholder-white/30"
+        placeholder="Note text…"
+        onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();saveLightboxNote();}"
+      ></textarea>
+      <button
+        id="lb-save-btn"
+        onclick="saveLightboxNote()"
+        class="flex-shrink-0 text-xs bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded transition-colors"
+      >Save</button>
+    </div>
   </div>
 </div>
 
@@ -573,6 +616,20 @@ function toggleBin(codeId) {
   }
 }
 
+function collapseAllUncategorized(collapse) {
+  const binBody = document.querySelector("#bin-uncategorized .bin-body");
+  binBody.querySelectorAll(".pid-body").forEach(body => {
+    body.classList.toggle("hidden", collapse);
+    body.closest(".pid-group").querySelector(".pid-chevron").textContent = collapse ? "▶" : "▼";
+  });
+  binBody.querySelectorAll(".sec-body").forEach(body => {
+    body.classList.toggle("hidden", collapse);
+    body.closest(".sec-group").querySelector(".sec-chevron")?.textContent && (
+      body.closest(".sec-group").querySelector(".sec-chevron").textContent = collapse ? "▶" : "▼"
+    );
+  });
+}
+
 function togglePidGroup(headerEl) {
   const group = headerEl.closest(".pid-group");
   const body = group.querySelector(".pid-body");
@@ -764,9 +821,9 @@ function escHtml(s) {
 document.addEventListener("dblclick", e => {
   const chip = e.target.closest(".note-chip");
   if (!chip) return;
-  const { pid, start, end, text } = chip.dataset;
+  const { noteId, pid, start, end, text } = chip.dataset;
   if (!pid) return;
-  openLightbox(pid, +start, end ? +end : null, text || "");
+  openLightbox(+noteId, pid, +start, end ? +end : null, text || "");
 });
 
 document.getElementById("lightbox-overlay").addEventListener("click", e => {
@@ -783,15 +840,18 @@ import { VidstackPlayer, VidstackPlayerLayout } from "https://cdn.vidstack.io/pl
 
 let _lbPlayer = null;
 let _lbPid = null;
+let _lbNoteId = null;
 
 function fmtSeconds(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
 }
 
-async function openLightbox(pid, startSeconds, endSeconds, text) {
+async function openLightbox(noteId, pid, startSeconds, endSeconds, text) {
   const overlay = document.getElementById("lightbox-overlay");
   overlay.classList.remove("hidden");
+
+  _lbNoteId = noteId;
 
   // Populate metadata bar
   document.getElementById("lb-pid").textContent = pid;
@@ -800,6 +860,7 @@ async function openLightbox(pid, startSeconds, endSeconds, text) {
     : fmtSeconds(startSeconds);
   document.getElementById("lb-time").textContent = timeStr;
   document.getElementById("lb-text").textContent = text;
+  document.getElementById("lb-note-textarea").value = text;
 
   if (_lbPlayer && _lbPid === pid) {
     _lbPlayer.currentTime = startSeconds;
@@ -832,8 +893,75 @@ function closeLightbox() {
   if (_lbPlayer) _lbPlayer.pause();
 }
 
+async function saveLightboxNote() {
+  if (!_lbNoteId) return;
+  const textarea = document.getElementById("lb-note-textarea");
+  const newText = textarea.value.trim();
+  if (!newText) return;
+
+  const btn = document.getElementById("lb-save-btn");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  const res = await fetch(`/api/notes/${_lbNoteId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: newText }),
+  });
+
+  if (res.ok) {
+    // Update all matching chips in the DOM
+    document.querySelectorAll(`.note-chip[data-note-id="${_lbNoteId}"]`).forEach(chip => {
+      chip.dataset.text = newText;
+      const spans = chip.querySelectorAll("span");
+      if (spans[1]) spans[1].textContent = newText;
+    });
+    document.getElementById("lb-text").textContent = newText;
+    btn.textContent = "Saved";
+    setTimeout(() => { btn.textContent = "Save"; btn.disabled = false; }, 1200);
+  } else {
+    btn.textContent = "Error";
+    setTimeout(() => { btn.textContent = "Save"; btn.disabled = false; }, 1500);
+  }
+}
+
 window.openLightbox = openLightbox;
 window.closeLightbox = closeLightbox;
+window.saveLightboxNote = saveLightboxNote;
+</script>
+
+<script>
+// ---------------------------------------------------------------------------
+// Draggable column separator
+// ---------------------------------------------------------------------------
+(function () {
+  const sep = document.getElementById("col-separator");
+  const left = document.getElementById("left-col");
+  const container = document.getElementById("split-container");
+  let dragging = false, startX = 0, startW = 0;
+
+  sep.addEventListener("mousedown", e => {
+    dragging = true;
+    startX = e.clientX;
+    startW = left.getBoundingClientRect().width;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  });
+
+  document.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    const totalW = container.getBoundingClientRect().width - sep.offsetWidth;
+    const newW = Math.min(Math.max(startW + (e.clientX - startX), 150), totalW - 150);
+    left.style.width = newW + "px";
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  });
+})();
 </script>
 
 {% endblock %}
