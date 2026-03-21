@@ -162,14 +162,18 @@
           playerTargetRect: document.getElementById("player-target").getBoundingClientRect(),
           videoPaneRect: document.getElementById("video-pane").getBoundingClientRect(),
         });
-        if (window.__videoAspect) return;
-        if (mw && mh) {
-          window.__videoAspect = mw / mh;
-        } else {
-          if (videoEl?.videoWidth && videoEl?.videoHeight)
-            window.__videoAspect = videoEl.videoWidth / videoEl.videoHeight;
+        // Prefer the actual video element dimensions (most reliable), fall back to player state.
+        // Always overwrite a previously-guessed value if we now have real dimensions.
+        let aspect = null;
+        if (videoEl?.videoWidth && videoEl?.videoHeight) {
+          aspect = videoEl.videoWidth / videoEl.videoHeight;
+        } else if (mw && mh) {
+          aspect = mw / mh;
         }
-        if (window.__videoAspect) applyDefaultVideoSize(window.__videoAspect);
+        if (!aspect) return;
+        // Only apply (and lock) once we have a real value; allow correction if prior value was wrong.
+        window.__videoAspect = aspect;
+        applyDefaultVideoSize(window.__videoAspect);
       });
     }
   }
