@@ -18,7 +18,7 @@
     <div id="left-col" style="display:flex; flex-direction:column; min-width:0; overflow:hidden; flex:0 0 75%;">
 
       <div id="video-pane" style="flex:1 1 0; min-height:0; background:#000; overflow:hidden; display:flex; align-items:center; justify-content:center; position:relative;">
-        <div id="player-target" style="aspect-ratio:16/9; max-width:100%; max-height:100%; width:auto; height:auto;"></div>
+        <div id="player-target" style="width:100%; height:100%;"></div>
       </div>
 
       <div id="hresize" style="flex:0 0 5px; background:#e5e7eb; cursor:row-resize; user-select:none;" title="Drag to resize · Double-click to fit"></div>
@@ -152,13 +152,20 @@
 
     for (const evname of ["loaded-metadata", "can-play", "can-play-through", "loaded-data", "stream-type-change", "media-type-change"]) {
       player.addEventListener(evname, () => {
-        if (window.__videoAspect) return;
         const mw = player.$state.mediaWidth();
         const mh = player.$state.mediaHeight();
+        const videoEl = document.querySelector("#player-target video");
+        console.log(`[${evname}]`, {
+          alreadySet: !!window.__videoAspect,
+          stateW: mw, stateH: mh,
+          elW: videoEl?.videoWidth, elH: videoEl?.videoHeight,
+          playerTargetRect: document.getElementById("player-target").getBoundingClientRect(),
+          videoPaneRect: document.getElementById("video-pane").getBoundingClientRect(),
+        });
+        if (window.__videoAspect) return;
         if (mw && mh) {
           window.__videoAspect = mw / mh;
         } else {
-          const videoEl = document.querySelector("#player-target video");
           if (videoEl?.videoWidth && videoEl?.videoHeight)
             window.__videoAspect = videoEl.videoWidth / videoEl.videoHeight;
         }
@@ -895,19 +902,13 @@
 
     const totalW = mainArea.getBoundingClientRect().width;
     const totalH = mainArea.getBoundingClientRect().height;
-    const availH = totalH - toolsPane.getBoundingClientRect().height
-                          - document.getElementById("hresize").getBoundingClientRect().height;
-    const maxW = totalW * 0.75;
+    const videoH = (totalW * 0.75) / aspect;
+    const toolsH = totalH - videoH - document.getElementById("hresize").getBoundingClientRect().height;
 
-    const wFromH = availH * aspect;
-    const hFromW = maxW / aspect;
-    let videoW, videoH;
-    if (wFromH <= maxW) { videoH = availH; videoW = wFromH; }
-    else { videoW = maxW; videoH = hFromW; }
+    console.log("[applyDefaultVideoSize]", { aspect, totalW, totalH, videoH, toolsH });
 
-    const leftFrac = videoW / totalW;
-    leftCol.style.flex = `0 0 ${leftFrac * 100}%`;
-    transcriptCol.style.flex = `0 0 ${(1 - leftFrac) * 100}%`;
+    leftCol.style.flex = `0 0 75%`;
+    transcriptCol.style.flex = `0 0 25%`;
     videoPane.style.flex = `0 0 ${videoH}px`;
   }
 
