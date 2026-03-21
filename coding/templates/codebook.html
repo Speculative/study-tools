@@ -242,6 +242,9 @@
 
 <style>
   .note-chip.dragging { opacity: 0.35; }
+  .note-chip.dragging-clone { opacity: 1; outline: 2px solid #60a5fa; outline-offset: 1px; cursor: copy; }
+  .note-chip.dragging-clone::after { content: "+"; position: absolute; top: -6px; right: -6px; background: #3b82f6; color: white; border-radius: 9999px; width: 14px; height: 14px; font-size: 10px; line-height: 14px; text-align: center; }
+  .note-chip.dragging-clone { position: relative; }
   .code-bin.drag-over .note-list:not([style*="display:none"]) { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
   .code-bin.drag-over .bin-header { background-color: #eff6ff; }
 </style>
@@ -273,6 +276,14 @@ function makeChip(noteId, pid, startSeconds, ts, text, inCode) {
   return d;
 }
 
+function chipTs(chip) {
+  // Re-derive the formatted timestamp string from dataset values
+  const start = +chip.dataset.start;
+  const end = chip.dataset.end;
+  const fmt = s => { const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60; return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`; };
+  return end ? `${fmt(start)}–${fmt(+end)}` : fmt(start);
+}
+
 function chipClass(inCode) {
   return inCode
     ? "note-chip border border-blue-200 bg-blue-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none"
@@ -293,13 +304,15 @@ document.addEventListener("dragstart", e => {
     noteId: +chip.dataset.noteId,
     fromCodeId: bin ? bin.dataset.codeId : null,
     el: chip,
+    clone: e.ctrlKey,
   };
   // Use rAF so the chip hasn't visually moved yet when screenshot is taken
-  requestAnimationFrame(() => chip.classList.add("dragging"));
+  e.dataTransfer.effectAllowed = e.ctrlKey ? "copy" : "move";
+  requestAnimationFrame(() => chip.classList.add(e.ctrlKey ? "dragging-clone" : "dragging"));
 });
 
 document.addEventListener("dragend", () => {
-  if (_dragging) _dragging.el.classList.remove("dragging");
+  if (_dragging) { _dragging.el.classList.remove("dragging"); _dragging.el.classList.remove("dragging-clone"); }
   _dragging = null;
   _dropTarget = null;
   BAR.classList.add("hidden");
@@ -314,6 +327,7 @@ document.addEventListener("dragover", e => {
   const bin = e.target.closest(".code-bin");
   if (!bin) { BAR.classList.add("hidden"); return; }
   e.preventDefault();
+  e.dataTransfer.dropEffect = _dragging.clone ? "copy" : "move";
 
   // Highlight bin
   document.querySelectorAll(".code-bin.drag-over").forEach(b => {
@@ -438,48 +452,56 @@ document.addEventListener("drop", async e => {
   BAR.classList.add("hidden");
   document.querySelectorAll(".code-bin.drag-over").forEach(b => b.classList.remove("drag-over"));
 
-  const { noteId, fromCodeId, el: chip } = _dragging;
+  const { noteId, fromCodeId, el: chip, clone: isClone } = _dragging;
   const { codeId: toCodeId, afterNoteId } = _dropTarget;
   _dragging = null;
   _dropTarget = null;
-  chip.classList.remove("dragging");
+  chip.classList.remove("dragging", "dragging-clone");
 
   const toBin = document.querySelector(`.code-bin[data-code-id="${toCodeId}"]`);
   if (!toBin) return;
   const inCode = toCodeId !== "uncategorized";
-  // For code bins .note-list is also .bin-body; for uncategorized use .bin-body for visual placement
   const toList = inCode ? toBin.querySelector(".note-list") : toBin.querySelector(".bin-body");
 
-  // Update chip styling
-  chip.className = chipClass(inCode);
-  chip.querySelector("span").className = metaClass(inCode);
-  // Update hide button color
-  const hbtn = chip.querySelector(".hide-btn");
-  if (hbtn) hbtn.className = inCode
-    ? "hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none"
-    : "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
+  // In clone mode, make a fresh chip to insert; original stays in place
+  const activeChip = isClone ? makeChip(
+    noteId,
+    chip.dataset.pid,
+    +chip.dataset.start,
+    chipTs(chip),
+    chip.dataset.text,
+    inCode,
+  ) : chip;
+
+  if (!isClone) {
+    // Update chip styling for move
+    activeChip.className = chipClass(inCode);
+    activeChip.querySelector("span").className = metaClass(inCode);
+    const hbtn = activeChip.querySelector(".hide-btn");
+    if (hbtn) hbtn.className = inCode
+      ? "hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none"
+      : "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
+  }
 
   // Insert into correct position in DOM
   if (afterNoteId === null) {
-    // Prepend (before all) if explicitly before first, or append if list was empty
     const firstChip = toList.querySelector(".note-chip");
-    if (firstChip && firstChip !== chip) {
-      toList.insertBefore(chip, firstChip);
+    if (firstChip && firstChip !== activeChip) {
+      toList.insertBefore(activeChip, firstChip);
     } else if (!firstChip) {
-      toList.appendChild(chip);
+      toList.appendChild(activeChip);
     }
-    // If afterNoteId is null but there are chips and chip === firstChip, no-op positionally
   } else {
     const afterEl = toList.querySelector(`.note-chip[data-note-id="${afterNoteId}"]`);
     if (afterEl) {
-      afterEl.insertAdjacentElement("afterend", chip);
+      afterEl.insertAdjacentElement("afterend", activeChip);
     } else {
-      toList.appendChild(chip);
+      toList.appendChild(activeChip);
     }
   }
 
   updateCount(toBin);
-  if (fromCodeId && fromCodeId !== toCodeId) {
+  if (!isClone && fromCodeId && fromCodeId !== toCodeId) {
     const fromBin = document.querySelector(`.code-bin[data-code-id="${fromCodeId}"]`);
     if (fromBin) updateCount(fromBin);
   }
@@ -487,7 +509,12 @@ document.addEventListener("drop", async e => {
   // --- Persist ---
   const movedBetweenCodes = fromCodeId !== toCodeId;
 
-  if (movedBetweenCodes) {
+  if (isClone) {
+    // Clone: add to target code (if it's a named code); never remove from source
+    if (inCode) {
+      await fetch(`/api/codes/${toCodeId}/notes/${noteId}`, { method: "POST" });
+    }
+  } else if (movedBetweenCodes) {
     if (inCode) {
       await fetch(`/api/codes/${toCodeId}/notes/${noteId}`, { method: "POST" });
     }
@@ -498,7 +525,7 @@ document.addEventListener("drop", async e => {
 
   // If dropped onto uncategorized, check whether other code bins still hold this note.
   // If so, this was a "copy" — don't actually show it in uncategorized; remove the chip.
-  if (!inCode && movedBetweenCodes) {
+  if (!isClone && !inCode && movedBetweenCodes) {
     const otherBins = [...document.querySelectorAll(`.code-bin:not([data-code-id="uncategorized"])`)];
     const stillCoded = otherBins.some(b =>
       b.querySelector(`.note-chip[data-note-id="${noteId}"]`)
@@ -722,8 +749,11 @@ async function hideNote(btn) {
   const otherChips = allChips.filter(c => c !== chip);
 
   if (otherChips.length > 0) {
-    // Note exists elsewhere — just remove this copy (no DB change needed)
-    const bin = chip.closest(".code-bin") || document.getElementById("bin-uncategorized");
+    // Note exists elsewhere — remove from this code only
+    const bin = chip.closest(".code-bin");
+    if (bin && bin.dataset.codeId !== "uncategorized") {
+      await fetch(`/api/codes/${bin.dataset.codeId}/notes/${noteId}`, { method: "DELETE" });
+    }
     chip.remove();
     if (bin) updateCount(bin);
     return;
