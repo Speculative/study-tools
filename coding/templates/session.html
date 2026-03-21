@@ -1250,6 +1250,7 @@
         style: "cursor:pointer",
       });
       g.addEventListener("click", (e) => {
+        if (_noteDragJustEnded) { e.stopPropagation(); _noteDragJustEnded = false; return; }
         e.stopPropagation();
         seekTo(note.start_seconds);
       });
@@ -1260,7 +1261,7 @@
           x: x1, y: noteY + 6, width: Math.max(2, x2 - x1), height: 8,
           fill: "#fde68a", stroke: "#d97706", "stroke-width": 1, rx: 2,
         }));
-        // End caps
+        // Visible end caps
         g.appendChild(_svgEl("line", {
           x1, y1: noteY + 4, x2: x1, y2: noteY + 16,
           stroke: "#d97706", "stroke-width": 1.5,
@@ -1274,6 +1275,29 @@
           x1: midX, y1: TL.TRACK_Y + TL.TRACK_H, x2: midX, y2: noteY + 10,
           stroke: "#d97706", "stroke-width": 0.75, "stroke-dasharray": "2,2",
         }));
+
+        // Invisible drag handle targets (wider hit area) for start and end edges
+        const mkHandle = (cx, edge) => {
+          const handle = _svgEl("rect", {
+            x: cx - 5, y: noteY + 2, width: 10, height: 18,
+            fill: "transparent", style: "cursor:ew-resize",
+          });
+          handle.addEventListener("mousedown", (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const container = document.getElementById("timeline-container");
+            _noteDrag = {
+              noteId: note.id,
+              edge,
+              origStart: note.start_seconds,
+              origEnd:   note.end_seconds,
+              containerRect: container.getBoundingClientRect(),
+            };
+          });
+          return handle;
+        };
+        g.appendChild(mkHandle(x1, "start"));
+        g.appendChild(mkHandle(x2, "end"));
       } else {
         // Instant note: stem + diamond
         g.appendChild(_svgEl("line", {
@@ -1310,12 +1334,41 @@
     ph.setAttribute("x2", x);
   }
 
+  // ---------------------------------------------------------------------------
+  // Note edge drag state
+  // ---------------------------------------------------------------------------
+  let _noteDrag = null;
+  // _noteDrag: { noteId, edge: "start"|"end", origStart, origEnd, containerRect }
+  let _noteDragJustEnded = false; // suppress the click that fires after mouseup
+
+  function _xToT(clientX, containerRect) {
+    // Convert a clientX position to a video time, respecting focus window.
+    const frac = Math.max(0, Math.min(1, (clientX - containerRect.left) / containerRect.width));
+    if (_focusedSection) {
+      const { startSeconds, endSeconds } = _focusedSection;
+      return startSeconds + frac * (endSeconds - startSeconds);
+    }
+    return frac * (_tlDuration() || 0);
+  }
+
+  async function _patchNoteTiming(noteId, startSeconds, endSeconds) {
+    const res = await fetch(`/api/notes/${noteId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start_seconds: startSeconds, end_seconds: endSeconds }),
+    });
+    if (!res.ok) return;
+    const n = _notes.find(n => n.id === noteId);
+    if (n) _mutateNote({ ...n, start_seconds: startSeconds, end_seconds: endSeconds }, null);
+  }
+
   function attachTimelineHandlers() {
     const container = document.getElementById("timeline-container");
     if (!container) return;
 
     // Click to seek
     container.addEventListener("click", (e) => {
+      if (_noteDragJustEnded) { _noteDragJustEnded = false; return; }
       const rect = container.getBoundingClientRect();
       const frac = (e.clientX - rect.left) / rect.width;
       if (_focusedSection) {
@@ -1331,6 +1384,40 @@
       if (_focusedSection) {
         e.stopPropagation();
         unfocusSection();
+      }
+    });
+
+    // Note edge drag — mousemove/mouseup on document so drag continues outside container
+    document.addEventListener("mousemove", (e) => {
+      if (!_noteDrag) return;
+      e.preventDefault();
+      const t = _xToT(e.clientX, _noteDrag.containerRect);
+      const note = _notes.find(n => n.id === _noteDrag.noteId);
+      if (!note) return;
+
+      let newStart = note.start_seconds;
+      let newEnd   = note.end_seconds;
+      if (_noteDrag.edge === "start") {
+        newStart = Math.min(t, note.end_seconds - 0.5);
+      } else {
+        newEnd = Math.max(t, note.start_seconds + 0.5);
+      }
+      // Optimistically update in-memory for live feedback
+      note.start_seconds = newStart;
+      note.end_seconds   = newEnd;
+      renderTimeline();
+    });
+
+    document.addEventListener("mouseup", async (e) => {
+      if (!_noteDrag) return;
+      const drag = _noteDrag;
+      _noteDrag = null;
+      _noteDragJustEnded = true;
+      const note = _notes.find(n => n.id === drag.noteId);
+      if (!note) return;
+      // Persist only if actually changed
+      if (note.start_seconds !== drag.origStart || note.end_seconds !== drag.origEnd) {
+        await _patchNoteTiming(drag.noteId, note.start_seconds, note.end_seconds);
       }
     });
 

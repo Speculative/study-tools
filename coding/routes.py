@@ -50,7 +50,8 @@ def _load_all_participants() -> tuple[list[str], set[str]]:
     return sorted(all_entries.keys()), facilitators
 
 
-def _seconds_to_ts(s: int) -> str:
+def _seconds_to_ts(s) -> str:
+    s = int(s)
     h = s // 3600
     m = (s % 3600) // 60
     sec = s % 60
@@ -272,6 +273,11 @@ def update_note(note_id: int):
         updates["text"] = text
     if "hidden" in payload:
         updates["hidden"] = 1 if payload["hidden"] else 0
+    if "start_seconds" in payload:
+        updates["start_seconds"] = float(payload["start_seconds"])
+    if "end_seconds" in payload:
+        v = payload["end_seconds"]
+        updates["end_seconds"] = float(v) if v is not None else None
     if not updates:
         return jsonify({"error": "nothing to update"}), 400
     db = get_db()
