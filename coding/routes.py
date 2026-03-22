@@ -350,24 +350,91 @@ def codebook():
             pid_section_notes[pid][sec] = []
         pid_section_notes[pid][sec].append(n)
 
-    uncategorized_groups = []
-    for pid in pid_order:
-        sections = [
-            {"name": sec_name, "notes": notes}
-            for sec_name, notes in pid_section_notes[pid].items()
-        ]
-        total = sum(len(s["notes"]) for s in sections)
-        uncategorized_groups.append({"pid": pid, "sections": sections, "total": total})
+    # Fetch sheet columns and cells for display in uncategorized groups
+    sheet_columns = list(db.execute(
+        "SELECT id, name FROM sheet_columns ORDER BY sort_order, id"
+    ).fetchall())
+    sheet_columns = [{"id": r[0], "name": r[1]} for r in sheet_columns]
+    sheet_cells_raw = list(db.execute("SELECT pid, col_id, value FROM sheet_cells").fetchall())
+    sheet_cells: dict[str, dict[int, str]] = {}
+    for pid, col_id, value in sheet_cells_raw:
+        sheet_cells.setdefault(pid, {})[col_id] = value
 
-    # For each code, fetch its notes ordered by sort_order
+    # Map "First"/"Second" prefixed columns to task ordinal
+    _ordinal_prefix = {"1": "First", "2": "Second"}
+    # Build col_id lookup: (ordinal, bare_name) -> col_id
+    _task_col_lookup: dict[tuple[str, str], int] = {}
+    _notes_col_id: int | None = None
+    for col in sheet_columns:
+        if col["name"] == "Notes":
+            _notes_col_id = col["id"]
+            continue
+        for ordinal, prefix in _ordinal_prefix.items():
+            if col["name"].startswith(prefix + " "):
+                bare = col["name"][len(prefix) + 1:]
+                _task_col_lookup[(ordinal, bare)] = col["id"]
+
+    def _task_props_for_section(pid: str, sec_name: str) -> list[str]:
+        """Return ordered non-empty values for task-specific sheet columns."""
+        # Extract task ordinal from section name like "Task 1", "Task 2"
+        parts = sec_name.split()
+        if len(parts) == 2 and parts[0] == "Task":
+            ordinal = parts[1]
+        else:
+            return []
+        pid_cells = sheet_cells.get(pid, {})
+        result = []
+        for bare in ["Task", "Condition", "Task Time"]:
+            col_id = _task_col_lookup.get((ordinal, bare))
+            if col_id is not None:
+                val = pid_cells.get(col_id, "")
+                if val:
+                    if bare == "Task Time":
+                        try:
+                            secs = int(val)
+                            val = f"{secs // 60:02d}:{secs % 60:02d}"
+                        except ValueError:
+                            pass
+                    result.append(val)
+        return result
+
+    # Build pid -> section ordinal -> condition lookup
+    def _condition_for(pid: str, sec_name: str) -> str:
+        parts = sec_name.split()
+        if len(parts) == 2 and parts[0] == "Task":
+            ordinal = parts[1]
+            col_id = _task_col_lookup.get((ordinal, "Condition"))
+            if col_id is not None:
+                return sheet_cells.get(pid, {}).get(col_id, "")
+        return ""
+
+    uncategorized_groups = []
+    for pid in sorted(pid_order):
+        pid_cells = sheet_cells.get(pid, {})
+        sections = []
+        for sec_name, notes in pid_section_notes[pid].items():
+            condition = _condition_for(pid, sec_name)
+            for n in notes:
+                n["condition"] = condition
+            task_props = _task_props_for_section(pid, sec_name)
+            sections.append({"name": sec_name, "notes": notes, "task_props": task_props})
+        total = sum(len(s["notes"]) for s in sections)
+        notes_prop = pid_cells.get(_notes_col_id, "") if _notes_col_id is not None else ""
+        uncategorized_groups.append({"pid": pid, "sections": sections, "total": total, "notes_prop": notes_prop})
+
+    # For each code, fetch its notes ordered by pid then start time
     for c in code_list:
         c["notes"] = list(db.execute(
             "SELECT n.id, n.pid, n.text, n.start_seconds, n.end_seconds "
             "FROM notes n JOIN note_codes nc ON nc.note_id = n.id "
-            "WHERE nc.code_id = ? AND (n.hidden = 0 OR n.hidden IS NULL) ORDER BY nc.sort_order, nc.id",
+            "WHERE nc.code_id = ? AND (n.hidden = 0 OR n.hidden IS NULL) ORDER BY n.pid, n.start_seconds",
             [c["id"]],
         ).fetchall())
-        c["notes"] = [{"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3], "end_seconds": r[4]} for r in c["notes"]]
+        c["notes"] = [
+            {"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3], "end_seconds": r[4],
+             "condition": _condition_for(r[1], _section_for_note({"pid": r[1], "start_seconds": r[3]}))}
+            for r in c["notes"]
+        ]
 
     return render_template("codebook.html", codes=code_list, uncategorized=uncategorized,
                            uncategorized_groups=uncategorized_groups, hidden_notes=hidden_notes)

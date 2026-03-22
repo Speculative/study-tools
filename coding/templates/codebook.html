@@ -52,6 +52,9 @@
           <span class="pid-chevron text-gray-300 text-xs">▼</span>
           <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{{ group.pid }}</span>
           <span class="text-xs text-gray-300 pid-count">({{ group.total }})</span>
+          {% if group.notes_prop %}
+          <span class="text-xs text-gray-400 italic">{{ group.notes_prop }}</span>
+          {% endif %}
         </div>
         <div class="pid-body flex flex-col gap-2 pl-3">
           {% for sec in group.sections %}
@@ -64,6 +67,9 @@
               <span class="sec-chevron text-gray-300 text-xs">▼</span>
               <span class="text-xs text-gray-400 italic">{{ sec.name }}</span>
               <span class="text-xs text-gray-300 sec-count">({{ sec.notes|length }})</span>
+              {% if sec.task_props %}
+              <span class="text-xs text-gray-400">({{ sec.task_props | join(", ") }})</span>
+              {% endif %}
             </div>
             {% endif %}
             <div class="sec-body flex flex-wrap gap-2 {% if sec.name %}pl-3{% endif %}">
@@ -76,6 +82,7 @@
                 data-start="{{ note.start_seconds }}"
                 data-end="{{ note.end_seconds if note.end_seconds is not none else '' }}"
                 data-text="{{ note.text }}"
+                data-condition="{{ note.condition }}"
               >
                 <span class="text-gray-400 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
                 ><span class="text-gray-800">{{ note.text }}</span
@@ -168,6 +175,7 @@
             data-start="{{ note.start_seconds }}"
             data-end="{{ note.end_seconds if note.end_seconds is not none else '' }}"
             data-text="{{ note.text }}"
+            data-condition="{{ note.condition }}"
           >
             <span class="text-blue-300 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
             ><span class="text-gray-800">{{ note.text }}</span
@@ -205,7 +213,6 @@
 </div><!-- /page root -->
 
 <!-- Drop indicator bar (shared, moved around the DOM) -->
-<div id="drop-bar" class="hidden bg-blue-500 rounded pointer-events-none" style="position:absolute;width:2px;"></div>
 
 <!-- Video lightbox -->
 <div id="lightbox-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/75">
@@ -241,6 +248,9 @@
 </div>
 
 <style>
+  .note-chip[data-condition="Logger"]     { border-color: #86efac; background-color: #f0fdf4; }
+  .note-chip[data-condition="Tracer"] { border-color: #93c5fd; background-color: #eff6ff; }
+  .note-chip[data-condition="Breakpoints"]     { border-color: #d8b4fe; background-color: #faf5ff; }
   .note-chip.dragging { opacity: 0.35; }
   .note-chip.dragging-clone { opacity: 1; outline: 2px solid #60a5fa; outline-offset: 1px; cursor: copy; }
   .note-chip.dragging-clone::after { content: "+"; position: absolute; top: -6px; right: -6px; background: #3b82f6; color: white; border-radius: 9999px; width: 14px; height: 14px; font-size: 10px; line-height: 14px; text-align: center; }
@@ -254,20 +264,20 @@
 // State
 // ---------------------------------------------------------------------------
 let _dragging = null;   // { noteId, fromCodeId, el }
-let _dropTarget = null; // { codeId, afterNoteId | null }  — null afterNoteId = append
-
-const BAR = document.getElementById("drop-bar");
+let _dropTarget = null; // { codeId }
 
 // ---------------------------------------------------------------------------
 // Chip factory
 // ---------------------------------------------------------------------------
-function makeChip(noteId, pid, startSeconds, ts, text, inCode) {
+function makeChip(noteId, pid, startSeconds, end, ts, text, condition, inCode) {
   const d = document.createElement("div");
   d.className = chipClass(inCode);
   d.draggable = true;
   d.dataset.noteId = String(noteId);
   d.dataset.pid = pid;
   d.dataset.start = String(startSeconds);
+  if (end) d.dataset.end = String(end);
+  if (condition) d.dataset.condition = condition;
   const hideBtnClass = inCode ? "hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none" : "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
   d.innerHTML =
     `<span class="${metaClass(inCode)}">${escHtml(pid)}·${escHtml(ts)} </span>` +
@@ -315,145 +325,54 @@ document.addEventListener("dragend", () => {
   if (_dragging) { _dragging.el.classList.remove("dragging"); _dragging.el.classList.remove("dragging-clone"); }
   _dragging = null;
   _dropTarget = null;
-  BAR.classList.add("hidden");
   document.querySelectorAll(".code-bin.drag-over").forEach(b => b.classList.remove("drag-over"));
 });
 
 // ---------------------------------------------------------------------------
-// Drag over — compute insertion point and show bar
+// Drag over — highlight the whole bin as drop target
 // ---------------------------------------------------------------------------
 document.addEventListener("dragover", e => {
   if (!_dragging) return;
   const bin = e.target.closest(".code-bin");
-  if (!bin) { BAR.classList.add("hidden"); return; }
+  if (!bin) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = _dragging.clone ? "copy" : "move";
 
-  // Highlight bin
   document.querySelectorAll(".code-bin.drag-over").forEach(b => {
     if (b !== bin) b.classList.remove("drag-over");
   });
   bin.classList.add("drag-over");
-
-  const binBody = bin.querySelector(".bin-body");
-  const collapsed = binBody && binBody.classList.contains("hidden");
-
-  // For collapsed bins, or uncategorized (which has nested sub-groups), just show intent
-  if (collapsed || bin.dataset.codeId === "uncategorized") {
-    BAR.classList.add("hidden");
-    _dropTarget = { codeId: bin.dataset.codeId, afterNoteId: null };
-    return;
-  }
-
-  const list = bin.querySelector(".note-list");
-  const chips = [...list.querySelectorAll(".note-chip")].filter(c => c !== _dragging.el);
-
-  if (chips.length === 0) {
-    // Empty list — bar at bottom of list area
-    positionBarInList(list, null, null);
-    _dropTarget = { codeId: bin.dataset.codeId, afterNoteId: null };
-    return;
-  }
-
-  // Chips wrap inline — find nearest chip by 2D distance, then decide
-  // left-of-midX → insert before it, right-of-midX → insert after it.
-  let bestChip = null;
-  let bestBefore = true;
-  let bestDist = Infinity;
-
-  chips.forEach(chip => {
-    const r = chip.getBoundingClientRect();
-    const midX = r.left + r.width / 2;
-    const midY = r.top + r.height / 2;
-    const dist = Math.hypot(e.clientX - midX, e.clientY - midY);
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestChip = chip;
-      bestBefore = e.clientX < midX;
-    }
-  });
-
-  if (bestBefore) {
-    positionBarBefore(bestChip);
-    _dropTarget = {
-      codeId: bin.dataset.codeId,
-      afterNoteId: prevNoteId(bestChip, chips),
-    };
-  } else {
-    positionBarAfter(bestChip);
-    _dropTarget = {
-      codeId: bin.dataset.codeId,
-      afterNoteId: +bestChip.dataset.noteId,
-    };
-  }
+  _dropTarget = { codeId: bin.dataset.codeId };
 });
-
-function prevNoteId(chip, chips) {
-  const idx = chips.indexOf(chip);
-  return idx > 0 ? +chips[idx - 1].dataset.noteId : null;
-}
-
-// Vertical bar to the left edge of `chip`
-function positionBarBefore(chip) {
-  const list = chip.closest(".note-list");
-  const listRect = list.getBoundingClientRect();
-  const chipRect = chip.getBoundingClientRect();
-  list.style.position = "relative";
-  list.appendChild(BAR);
-  BAR.style.left   = (chipRect.left - listRect.left - 2) + "px";
-  BAR.style.top    = (chipRect.top  - listRect.top)  + "px";
-  BAR.style.height = chipRect.height + "px";
-  BAR.style.right  = "";
-  BAR.style.width  = "2px";
-  BAR.classList.remove("hidden");
-}
-
-// Vertical bar to the right edge of `chip`
-function positionBarAfter(chip) {
-  const list = chip.closest(".note-list");
-  const listRect = list.getBoundingClientRect();
-  const chipRect = chip.getBoundingClientRect();
-  list.style.position = "relative";
-  list.appendChild(BAR);
-  BAR.style.left   = (chipRect.right - listRect.left + 2) + "px";
-  BAR.style.top    = (chipRect.top   - listRect.top)  + "px";
-  BAR.style.height = chipRect.height + "px";
-  BAR.style.right  = "";
-  BAR.style.width  = "2px";
-  BAR.classList.remove("hidden");
-}
-
-// Empty list — short bar at left edge of list
-function positionBarInList(list) {
-  list.style.position = "relative";
-  list.appendChild(BAR);
-  BAR.style.left   = "0px";
-  BAR.style.top    = "4px";
-  BAR.style.height = "24px";
-  BAR.style.right  = "";
-  BAR.style.width  = "2px";
-  BAR.classList.remove("hidden");
-}
 
 document.addEventListener("dragleave", e => {
   const bin = e.target.closest(".code-bin");
   if (bin && !bin.contains(e.relatedTarget)) {
     bin.classList.remove("drag-over");
-    BAR.classList.add("hidden");
   }
 });
 
 // ---------------------------------------------------------------------------
 // Drop
 // ---------------------------------------------------------------------------
+
+// Insert chip into note-list in sorted order (pid asc, start_seconds asc)
+function insertChipSorted(list, chip) {
+  const pid = chip.dataset.pid;
+  const start = +chip.dataset.start;
+  const siblings = [...list.querySelectorAll(".note-chip")].filter(c => c !== chip);
+  const after = siblings.find(c => c.dataset.pid > pid || (c.dataset.pid === pid && +c.dataset.start > start));
+  if (after) list.insertBefore(chip, after);
+  else list.appendChild(chip);
+}
+
 document.addEventListener("drop", async e => {
   if (!_dragging || !_dropTarget) return;
   e.preventDefault();
-  BAR.classList.add("hidden");
   document.querySelectorAll(".code-bin.drag-over").forEach(b => b.classList.remove("drag-over"));
 
   const { noteId, fromCodeId, el: chip, clone: isClone } = _dragging;
-  const { codeId: toCodeId, afterNoteId } = _dropTarget;
+  const { codeId: toCodeId } = _dropTarget;
   _dragging = null;
   _dropTarget = null;
   chip.classList.remove("dragging", "dragging-clone");
@@ -464,12 +383,17 @@ document.addEventListener("drop", async e => {
   const toList = inCode ? toBin.querySelector(".note-list") : toBin.querySelector(".bin-body");
 
   // In clone mode, make a fresh chip to insert; original stays in place
+  // No-op: dropped back into the same uncategorized container
+  if (!isClone && fromCodeId === toCodeId) return;
+
   const activeChip = isClone ? makeChip(
     noteId,
     chip.dataset.pid,
     +chip.dataset.start,
+    chip.dataset.end || "",
     chipTs(chip),
     chip.dataset.text,
+    chip.dataset.condition || "",
     inCode,
   ) : chip;
 
@@ -483,21 +407,11 @@ document.addEventListener("drop", async e => {
       : "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
   }
 
-  // Insert into correct position in DOM
-  if (afterNoteId === null) {
-    const firstChip = toList.querySelector(".note-chip");
-    if (firstChip && firstChip !== activeChip) {
-      toList.insertBefore(activeChip, firstChip);
-    } else if (!firstChip) {
-      toList.appendChild(activeChip);
-    }
+  // Insert in sorted order for code bins; uncategorized gets appended (it re-sorts on reload)
+  if (inCode) {
+    insertChipSorted(toList, activeChip);
   } else {
-    const afterEl = toList.querySelector(`.note-chip[data-note-id="${afterNoteId}"]`);
-    if (afterEl) {
-      afterEl.insertAdjacentElement("afterend", activeChip);
-    } else {
-      toList.appendChild(activeChip);
-    }
+    toList.appendChild(activeChip);
   }
 
   updateCount(toBin);
@@ -510,7 +424,6 @@ document.addEventListener("drop", async e => {
   const movedBetweenCodes = fromCodeId !== toCodeId;
 
   if (isClone) {
-    // Clone: add to target code (if it's a named code); never remove from source
     if (inCode) {
       await fetch(`/api/codes/${toCodeId}/notes/${noteId}`, { method: "POST" });
     }
@@ -534,16 +447,6 @@ document.addEventListener("drop", async e => {
       chip.remove();
       updateCount(toBin);
     }
-  }
-
-  // Always persist order within the target code
-  if (inCode) {
-    const orderedIds = [...toList.querySelectorAll(".note-chip")].map(c => +c.dataset.noteId);
-    await fetch(`/api/codes/${toCodeId}/order`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ note_ids: orderedIds }),
-    });
   }
 });
 
