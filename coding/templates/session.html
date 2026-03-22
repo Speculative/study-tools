@@ -149,6 +149,11 @@
       updateTimelinePlayhead(player.currentTime);
     });
 
+    const _hashT = parseFloat(window.location.hash.match(/^#t=(\d+(?:\.\d+)?)$/)?.[1]);
+    if (!isNaN(_hashT)) {
+      player.addEventListener("can-play", () => { seekTo(_hashT); }, { once: true });
+    }
+
 
     for (const evname of ["loaded-metadata", "can-play", "can-play-through", "loaded-data", "stream-type-change", "media-type-change"]) {
       player.addEventListener(evname, () => {

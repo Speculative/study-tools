@@ -33,7 +33,6 @@
       <span class="bin-chevron text-gray-400 text-xs">▼</span>
       <span class="font-semibold text-gray-600 text-sm uppercase tracking-wide">Uncategorized</span>
       <span class="text-xs text-gray-400 note-count">({{ uncategorized|length }})</span>
-      <span class="bin-preview ml-2 text-xs text-gray-400 truncate hidden"></span>
       <div class="ml-auto flex gap-1" onclick="event.stopPropagation()">
         <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllUncategorized(true)">collapse all</button>
         <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllUncategorized(false)">expand all</button>
@@ -150,15 +149,11 @@
         <div
           class="bin-header px-4 py-2 border-b border-blue-100 bg-blue-50 rounded-t-lg flex items-center gap-2 cursor-pointer select-none"
           onclick="toggleBin('{{ code.id }}')"
+          ondblclick="startRenameCode(this.querySelector('.code-name'), {{ code.id }});"
         >
           <span class="bin-chevron text-blue-300 text-xs">▼</span>
-          <span
-            class="code-name font-semibold text-blue-800 text-sm"
-            title="Double-click to rename"
-            ondblclick="event.stopPropagation(); startRenameCode(this, {{ code.id }})"
-          >{{ code.name }}</span>
+          <span class="code-name font-semibold text-blue-800 text-sm">{{ code.name }}</span>
           <span class="text-xs text-blue-300 note-count">({{ code.notes|length }})</span>
-          <span class="bin-preview ml-2 text-xs text-blue-300 truncate hidden"></span>
           <button
             class="ml-auto text-red-300 hover:text-red-500 text-xs flex-shrink-0"
             onclick="event.stopPropagation(); deleteCode({{ code.id }})"
@@ -216,7 +211,7 @@
 
 <!-- Video lightbox -->
 <div id="lightbox-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/75">
-  <div class="relative w-full max-w-5xl mx-6 flex flex-col gap-3">
+  <div class="relative flex flex-col gap-3" style="width:90vw;">
     <div class="flex items-start justify-between gap-4">
       <div>
         <span id="lb-pid" class="text-white font-semibold text-sm"></span>
@@ -224,10 +219,15 @@
         <span id="lb-time" class="text-white/70 text-sm font-mono"></span>
         <p id="lb-text" class="text-white/80 text-sm mt-0.5 leading-snug"></p>
       </div>
-      <button
-        onclick="closeLightbox()"
-        class="flex-shrink-0 text-white/70 hover:text-white text-sm"
-      >✕ close</button>
+      <div class="flex items-center gap-3 flex-shrink-0">
+        <a id="lb-session-link" href="#"
+          class="text-white/70 hover:text-white text-sm"
+        >↗ open in session</a>
+        <button
+          onclick="closeLightbox()"
+          class="text-white/70 hover:text-white text-sm"
+        >✕ close</button>
+      </div>
     </div>
     <div id="lightbox-player-target" style="aspect-ratio:16/9;width:100%;"></div>
     <div class="flex gap-2 items-start mt-1">
@@ -453,19 +453,6 @@ document.addEventListener("drop", async e => {
 function updateCount(bin) {
   const n = bin.querySelectorAll(".note-chip").length;
   bin.querySelector(".note-count").textContent = `(${n})`;
-  updateBinPreview(bin);
-}
-
-function updateBinPreview(bin) {
-  const preview = bin.querySelector(".bin-preview");
-  if (!preview) return;
-  const chips = [...bin.querySelectorAll(".note-chip")];
-  if (chips.length === 0) { preview.textContent = ""; return; }
-  const samples = chips.slice(0, 2).map(c => {
-    const textEl = c.querySelectorAll("span")[1];
-    return textEl ? textEl.textContent.trim() : "";
-  }).filter(Boolean);
-  preview.textContent = samples.join(" · ") + (chips.length > 2 ? " …" : "");
 }
 
 // ---------------------------------------------------------------------------
@@ -508,14 +495,11 @@ function insertCodeBin(code) {
   bin.dataset.codeId = String(code.id);
   bin.innerHTML = `
     <div class="bin-header px-4 py-2 border-b border-blue-100 bg-blue-50 rounded-t-lg flex items-center gap-2 cursor-pointer select-none"
-         onclick="toggleBin('${code.id}')">
+         onclick="toggleBin('${code.id}')"
+         ondblclick="startRenameCode(this.querySelector('.code-name'), ${code.id})">
       <span class="bin-chevron text-blue-300 text-xs">▼</span>
-      <span class="code-name font-semibold text-blue-800 text-sm"
-            title="Double-click to rename"
-            ondblclick="event.stopPropagation(); startRenameCode(this, ${code.id})"
-      >${escHtml(code.name)}</span>
+      <span class="code-name font-semibold text-blue-800 text-sm">${escHtml(code.name)}</span>
       <span class="text-xs text-blue-300 note-count">(0)</span>
-      <span class="bin-preview ml-2 text-xs text-blue-300 truncate hidden"></span>
       <button class="ml-auto text-red-300 hover:text-red-500 text-xs flex-shrink-0"
               onclick="event.stopPropagation(); deleteCode(${code.id})" title="Delete code">✕</button>
     </div>
@@ -528,22 +512,14 @@ function insertCodeBin(code) {
 // Collapse / expand bins and sub-groups
 // ---------------------------------------------------------------------------
 function toggleBin(codeId) {
+  if (event?.detail >= 2) return;
   const bin = document.getElementById(`bin-${codeId}`) ||
               document.querySelector(`.code-bin[data-code-id="${codeId}"]`);
   if (!bin) return;
   const body = bin.querySelector(".bin-body");
   const chevron = bin.querySelector(".bin-chevron");
-  const preview = bin.querySelector(".bin-preview");
   const collapsed = body.classList.toggle("hidden");
   chevron.textContent = collapsed ? "▶" : "▼";
-  if (preview) {
-    if (collapsed) {
-      updateBinPreview(bin);
-      preview.classList.remove("hidden");
-    } else {
-      preview.classList.add("hidden");
-    }
-  }
 }
 
 function collapseAllUncategorized(collapse) {
@@ -584,16 +560,14 @@ function startRenameCode(nameEl, codeId) {
   const input = document.createElement("input");
   input.type = "text";
   input.value = current;
-  input.className = "border border-blue-300 rounded px-1 text-sm font-semibold text-blue-800 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-blue-50";
+  input.className = "flex-1 min-w-0 border border-blue-300 rounded px-1 text-sm font-semibold text-blue-800 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-blue-50";
   nameEl.replaceWith(input);
   input.focus(); input.select();
 
   const finish = async save => {
     const name = input.value.trim();
     const span = document.createElement("span");
-    span.className = "code-name font-semibold text-blue-800 text-sm cursor-pointer";
-    span.title = "Double-click to rename";
-    span.ondblclick = () => startRenameCode(span, codeId);
+    span.className = "code-name font-semibold text-blue-800 text-sm";
     if (save && name && name !== current) {
       await fetch(`/api/codes/${codeId}`, {
         method: "PATCH",
@@ -737,11 +711,6 @@ function toggleHiddenBin() {
 }
 
 // ---------------------------------------------------------------------------
-// Init previews
-// ---------------------------------------------------------------------------
-document.querySelectorAll(".code-bin").forEach(bin => updateBinPreview(bin));
-
-// ---------------------------------------------------------------------------
 // Util
 // ---------------------------------------------------------------------------
 function escHtml(s) {
@@ -788,6 +757,7 @@ async function openLightbox(noteId, pid, startSeconds, endSeconds, text) {
 
   // Populate metadata bar
   document.getElementById("lb-pid").textContent = pid;
+  document.getElementById("lb-session-link").href = `/session/${pid}#t=${startSeconds}`;
   const timeStr = endSeconds != null
     ? `${fmtSeconds(startSeconds)} – ${fmtSeconds(endSeconds)}`
     : fmtSeconds(startSeconds);
@@ -861,6 +831,62 @@ async function saveLightboxNote() {
 window.openLightbox = openLightbox;
 window.closeLightbox = closeLightbox;
 window.saveLightboxNote = saveLightboxNote;
+
+const SPEEDS = [1, 2, 4];
+let _lbSpeed = 1;
+let _speedOverlayTimer = null;
+
+function showSpeedOverlay(speed) {
+  const container = document.getElementById("lightbox-player-target");
+  let el = document.getElementById("lb-speed-overlay");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "lb-speed-overlay";
+    el.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:10;";
+    container.style.position = "relative";
+    container.appendChild(el);
+  }
+  el.innerHTML = `<span style="font-size:3rem;font-weight:700;color:#fff;background:rgba(0,0,0,0.45);border-radius:12px;padding:8px 24px;letter-spacing:0.02em;">${speed}x</span>`;
+  el.style.opacity = "1";
+  clearTimeout(_speedOverlayTimer);
+  _speedOverlayTimer = setTimeout(() => {
+    el.style.transition = "opacity 0.3s";
+    el.style.opacity = "0";
+  }, 700);
+}
+
+function lbIsOpen() {
+  return !document.getElementById("lightbox-overlay").classList.contains("hidden");
+}
+
+document.addEventListener("keydown", e => {
+  if (!lbIsOpen() || !_lbPlayer) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+  if (e.ctrlKey && e.code === "ArrowUp") {
+    e.preventDefault();
+    const idx = SPEEDS.indexOf(_lbSpeed);
+    _lbSpeed = SPEEDS[Math.min(SPEEDS.length - 1, idx + 1)];
+    _lbPlayer.playbackRate = _lbSpeed;
+    showSpeedOverlay(_lbSpeed);
+  } else if (e.ctrlKey && e.code === "ArrowDown") {
+    e.preventDefault();
+    const idx = SPEEDS.indexOf(_lbSpeed);
+    _lbSpeed = SPEEDS[Math.max(0, idx - 1)];
+    _lbPlayer.playbackRate = _lbSpeed;
+    showSpeedOverlay(_lbSpeed);
+  } else if (e.code === "Space") {
+    e.preventDefault();
+    _lbPlayer.paused ? _lbPlayer.play() : _lbPlayer.pause();
+  } else if (e.code === "ArrowLeft") {
+    e.preventDefault();
+    _lbPlayer.currentTime = Math.max(0, _lbPlayer.currentTime - 5);
+  } else if (e.code === "ArrowRight") {
+    e.preventDefault();
+    _lbPlayer.currentTime = _lbPlayer.currentTime + 5;
+  }
+});
 </script>
 
 <script>
