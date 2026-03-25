@@ -3,6 +3,9 @@
 {% block body_class %}overflow-hidden{% endblock %}
 
 {% block body %}
+<style>
+  tr.transcript-active { background: #eff6ff !important; }
+</style>
 <div style="display:flex; flex-direction:column; height:100vh; width:100vw; overflow:hidden;">
 
   <!-- Header bar -->
@@ -356,8 +359,19 @@
   let _activeRow = null;
 
   function syncTranscript(currentTime) {
-    const rows = Array.from(document.querySelectorAll("#transcript-body tr[data-start]"))
-      .map(r => ({ seconds: parseFloat(r.getAttribute("data-start")), row: r }));
+    const rows = Array.from(document.querySelectorAll(
+      "#transcript-body tr[data-start], #transcript-body tr.note-row"
+    )).map(r => {
+      let seconds;
+      if (r.classList.contains("note-end")) {
+        seconds = parseFloat(r.getAttribute("data-note-end") ?? r.getAttribute("data-note-start"));
+      } else if (r.classList.contains("note-row")) {
+        seconds = parseFloat(r.getAttribute("data-note-start"));
+      } else {
+        seconds = parseFloat(r.getAttribute("data-start"));
+      }
+      return { seconds, row: r };
+    }).sort((a, b) => a.seconds - b.seconds);
     if (!rows.length) return;
 
     let active = rows[0].row;
@@ -366,11 +380,11 @@
       else break;
     }
     if (active === _activeRow) return;
-    if (_activeRow) _activeRow.style.background = "";
-    active.style.background = "#eff6ff";
+    if (_activeRow) _activeRow.classList.remove("transcript-active");
+    active.classList.add("transcript-active");
     _activeRow = active;
 
-    ensureSectionExpanded(active.getAttribute("data-section-id"));
+    ensureSectionExpanded(active.getAttribute("data-section-id") ?? "");
 
     const scroller = document.getElementById("transcript-scroll");
     scroller.scrollTo({
