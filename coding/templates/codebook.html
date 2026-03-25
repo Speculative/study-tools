@@ -259,7 +259,9 @@
   .code-bin.drag-over .bin-header { background-color: #eff6ff; }
 </style>
 
-<script>
+<script type="module">
+import { createPlayer, attachMediaHotkeys, escHtml, secondsToTs } from "{{ url_for('static', filename='player.js') }}";
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -287,11 +289,9 @@ function makeChip(noteId, pid, startSeconds, end, ts, text, condition, inCode) {
 }
 
 function chipTs(chip) {
-  // Re-derive the formatted timestamp string from dataset values
   const start = +chip.dataset.start;
   const end = chip.dataset.end;
-  const fmt = s => { const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60; return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`; };
-  return end ? `${fmt(start)}–${fmt(+end)}` : fmt(start);
+  return end ? `${secondsToTs(start)}–${secondsToTs(+end)}` : secondsToTs(start);
 }
 
 function chipClass(inCode) {
@@ -710,12 +710,7 @@ function toggleHiddenBin() {
   chevron.textContent = collapsed ? "▶" : "▼";
 }
 
-// ---------------------------------------------------------------------------
-// Util
-// ---------------------------------------------------------------------------
-function escHtml(s) {
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
+// escHtml imported from player.js
 
 // ---------------------------------------------------------------------------
 // Video lightbox (Vidstack)
@@ -735,19 +730,13 @@ document.getElementById("lightbox-overlay").addEventListener("click", e => {
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") closeLightbox();
 });
-</script>
 
-<script type="module">
-import { VidstackPlayer, VidstackPlayerLayout } from "https://cdn.vidstack.io/player";
-
+// ---------------------------------------------------------------------------
+// Video lightbox (Vidstack) — player management
+// ---------------------------------------------------------------------------
 let _lbPlayer = null;
 let _lbPid = null;
 let _lbNoteId = null;
-
-function fmtSeconds(s) {
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
-}
 
 async function openLightbox(noteId, pid, startSeconds, endSeconds, text) {
   const overlay = document.getElementById("lightbox-overlay");
@@ -759,8 +748,8 @@ async function openLightbox(noteId, pid, startSeconds, endSeconds, text) {
   document.getElementById("lb-pid").textContent = pid;
   document.getElementById("lb-session-link").href = `/session/${pid}#t=${startSeconds}`;
   const timeStr = endSeconds != null
-    ? `${fmtSeconds(startSeconds)} – ${fmtSeconds(endSeconds)}`
-    : fmtSeconds(startSeconds);
+    ? `${secondsToTs(startSeconds)} – ${secondsToTs(endSeconds)}`
+    : secondsToTs(startSeconds);
   document.getElementById("lb-time").textContent = timeStr;
   document.getElementById("lb-text").textContent = text;
   document.getElementById("lb-note-textarea").value = text;
@@ -778,12 +767,7 @@ async function openLightbox(noteId, pid, startSeconds, endSeconds, text) {
   }
 
   _lbPid = pid;
-  _lbPlayer = await VidstackPlayer.create({
-    target: "#lightbox-player-target",
-    title: pid,
-    src: `/video/${pid}`,
-    layout: new VidstackPlayerLayout({}),
-  });
+  _lbPlayer = await createPlayer("#lightbox-player-target", pid, `/video/${pid}`);
 
   _lbPlayer.addEventListener("can-play", async () => {
     _lbPlayer.currentTime = startSeconds;
@@ -828,72 +812,25 @@ async function saveLightboxNote() {
   }
 }
 
-window.openLightbox = openLightbox;
-window.closeLightbox = closeLightbox;
-window.saveLightboxNote = saveLightboxNote;
-
-const SPEEDS = [1, 2, 4];
-let _lbSpeed = 1;
-let _speedOverlayTimer = null;
-
-function showSpeedOverlay(speed) {
-  const container = document.getElementById("lightbox-player-target");
-  let el = document.getElementById("lb-speed-overlay");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "lb-speed-overlay";
-    el.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:10;";
-    container.style.position = "relative";
-    container.appendChild(el);
-  }
-  el.innerHTML = `<span style="font-size:3rem;font-weight:700;color:#fff;background:rgba(0,0,0,0.45);border-radius:12px;padding:8px 24px;letter-spacing:0.02em;">${speed}x</span>`;
-  el.style.opacity = "1";
-  clearTimeout(_speedOverlayTimer);
-  _speedOverlayTimer = setTimeout(() => {
-    el.style.transition = "opacity 0.3s";
-    el.style.opacity = "0";
-  }, 700);
-}
-
-function lbIsOpen() {
-  return !document.getElementById("lightbox-overlay").classList.contains("hidden");
-}
-
-document.addEventListener("keydown", e => {
-  if (!lbIsOpen() || !_lbPlayer) return;
-  const tag = document.activeElement?.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-  if (e.ctrlKey && e.code === "ArrowUp") {
-    e.preventDefault();
-    const idx = SPEEDS.indexOf(_lbSpeed);
-    _lbSpeed = SPEEDS[Math.min(SPEEDS.length - 1, idx + 1)];
-    _lbPlayer.playbackRate = _lbSpeed;
-    showSpeedOverlay(_lbSpeed);
-  } else if (e.ctrlKey && e.code === "ArrowDown") {
-    e.preventDefault();
-    const idx = SPEEDS.indexOf(_lbSpeed);
-    _lbSpeed = SPEEDS[Math.max(0, idx - 1)];
-    _lbPlayer.playbackRate = _lbSpeed;
-    showSpeedOverlay(_lbSpeed);
-  } else if (e.code === "Space") {
-    e.preventDefault();
-    _lbPlayer.paused ? _lbPlayer.play() : _lbPlayer.pause();
-  } else if (e.code === "ArrowLeft") {
-    e.preventDefault();
-    _lbPlayer.currentTime = Math.max(0, _lbPlayer.currentTime - 5);
-  } else if (e.code === "ArrowRight") {
-    e.preventDefault();
-    _lbPlayer.currentTime = _lbPlayer.currentTime + 5;
-  }
+// Lightbox media hotkeys
+attachMediaHotkeys(() => _lbPlayer, {
+  guard: () => !document.getElementById("lightbox-overlay").classList.contains("hidden"),
+  overlayContainer: () => document.getElementById("lightbox-player-target"),
 });
-</script>
 
-<script>
+// Expose functions used by inline onclick handlers in the template HTML.
+// These will be migrated to event listeners in a later refactor step.
+Object.assign(window, {
+  toggleBin, collapseAllUncategorized, togglePidGroup, toggleSecGroup,
+  toggleHiddenBin, hideNote, unhideNote, deleteCode, startRenameCode,
+  showNewCodeInput, hideNewCodeInput, submitNewCode, handleNewCodeKey,
+  closeLightbox, saveLightboxNote, openLightbox,
+});
+
 // ---------------------------------------------------------------------------
 // Draggable column separator
 // ---------------------------------------------------------------------------
-(function () {
+{
   const sep = document.getElementById("col-separator");
   const left = document.getElementById("left-col");
   const container = document.getElementById("split-container");
@@ -920,7 +857,7 @@ document.addEventListener("keydown", e => {
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
   });
-})();
+}
 </script>
 
 {% endblock %}

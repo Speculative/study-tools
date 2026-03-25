@@ -132,19 +132,15 @@
 
 <!-- Vidstack -->
 <script type="module">
-  import {
-    VidstackPlayer,
-    VidstackPlayerLayout,
-  } from "https://cdn.vidstack.io/player";
+  import { createPlayer, attachMediaHotkeys, escHtml, secondsToTs } from "{{ url_for('static', filename='player.js') }}";
 
   async function initPlayer() {
-    const player = await VidstackPlayer.create({
-      target: "#player-target",
-      title: {{ pid|tojson }},
-      src: {{ ("/video/" + pid)|tojson }},
-      layout: new VidstackPlayerLayout({}),
-      autoplay: true
-    });
+    const player = await createPlayer(
+      "#player-target",
+      {{ pid|tojson }},
+      {{ ("/video/" + pid)|tojson }},
+      { autoplay: true },
+    );
     window.__vds = player;
 
     player.addEventListener("time-update", () => {
@@ -157,21 +153,11 @@
       player.addEventListener("can-play", () => { seekTo(_hashT); }, { once: true });
     }
 
-
     for (const evname of ["loaded-metadata", "can-play", "can-play-through", "loaded-data", "stream-type-change", "media-type-change"]) {
       player.addEventListener(evname, () => {
         const mw = player.$state.mediaWidth();
         const mh = player.$state.mediaHeight();
         const videoEl = document.querySelector("#player-target video");
-        console.log(`[${evname}]`, {
-          alreadySet: !!window.__videoAspect,
-          stateW: mw, stateH: mh,
-          elW: videoEl?.videoWidth, elH: videoEl?.videoHeight,
-          playerTargetRect: document.getElementById("player-target").getBoundingClientRect(),
-          videoPaneRect: document.getElementById("video-pane").getBoundingClientRect(),
-        });
-        // Prefer the actual video element dimensions (most reliable), fall back to player state.
-        // Always overwrite a previously-guessed value if we now have real dimensions.
         let aspect = null;
         if (videoEl?.videoWidth && videoEl?.videoHeight) {
           aspect = videoEl.videoWidth / videoEl.videoHeight;
@@ -179,11 +165,37 @@
           aspect = mw / mh;
         }
         if (!aspect) return;
-        // Only apply (and lock) once we have a real value; allow correction if prior value was wrong.
         window.__videoAspect = aspect;
         applyDefaultVideoSize(window.__videoAspect);
       });
     }
+
+    // Media hotkeys (Space, arrows, speed) + session-specific keys (S, N)
+    attachMediaHotkeys(() => window.__vds, {
+      overlayContainer: document.getElementById("video-pane"),
+      seekTo,
+      extraKeys(e, player) {
+        if (e.code === "KeyS") {
+          e.preventDefault();
+          insertSectionInput(Math.floor(player.currentTime));
+        } else if (e.code === "KeyN") {
+          e.preventDefault();
+          const t = Math.floor(player.currentTime);
+          if (e.shiftKey) {
+            if (_noteRangeStart === null) {
+              _noteRangeStart = { seconds: t };
+              document.getElementById("note-range-indicator").style.display = "";
+            } else {
+              document.getElementById("note-range-indicator").style.display = "none";
+              insertNoteInput(t, true);
+            }
+          } else {
+            _noteRangeStart = null;
+            insertNoteInput(t, false);
+          }
+        }
+      },
+    });
   }
 
   if (document.readyState === "loading") {
@@ -191,9 +203,7 @@
   } else {
     initPlayer();
   }
-</script>
 
-<script>
   const PID = {{ pid|tojson }};
 
   // ---------------------------------------------------------------------------
@@ -540,9 +550,7 @@
     });
   }
 
-  function escHtml(s) {
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
+  // escHtml imported from player.js
 
   function cancelSectionInput() {
     document.getElementById("section-input-row")?.remove();
@@ -817,101 +825,7 @@
     input.addEventListener("blur", commit);
   }
 
-  // ---------------------------------------------------------------------------
-  // Speed overlay
-  // ---------------------------------------------------------------------------
-  let _speedOverlayTimer = null;
-
-  function showSpeedOverlay(speed) {
-    let el = document.getElementById("speed-overlay");
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "speed-overlay";
-      el.style.cssText = [
-        "position:absolute", "inset:0", "display:flex",
-        "align-items:center", "justify-content:center",
-        "pointer-events:none", "z-index:10",
-      ].join(";");
-      document.getElementById("video-pane").appendChild(el);
-    }
-    el.innerHTML = `<span style="
-      font-size:3rem; font-weight:700; color:#fff;
-      background:rgba(0,0,0,0.45); border-radius:12px;
-      padding:8px 24px; letter-spacing:0.02em;
-      transition:opacity 0.15s;
-    ">${speed}x</span>`;
-    el.style.opacity = "1";
-
-    clearTimeout(_speedOverlayTimer);
-    _speedOverlayTimer = setTimeout(() => {
-      el.style.transition = "opacity 0.3s";
-      el.style.opacity = "0";
-    }, 700);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Hotkeys
-  // ---------------------------------------------------------------------------
-  const SPEEDS = [1, 2, 4];
-
-  function attachHotkeyHandlers() {
-    document.addEventListener("keydown", (e) => {
-      const tag = document.activeElement?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-      const player = window.__vds;
-      if (!player) return;
-
-      if (e.ctrlKey && e.code === "ArrowUp") {
-        e.preventDefault();
-        const cur = player.playbackRate ?? 1;
-        const idx = SPEEDS.indexOf(cur);
-        const next = SPEEDS[Math.min(SPEEDS.length - 1, idx + 1)];
-        player.playbackRate = next;
-        showSpeedOverlay(next);
-        return;
-      } else if (e.ctrlKey && e.code === "ArrowDown") {
-        e.preventDefault();
-        const cur = player.playbackRate ?? 1;
-        const idx = SPEEDS.indexOf(cur);
-        const next = SPEEDS[Math.max(0, idx - 1)];
-        player.playbackRate = next;
-        showSpeedOverlay(next);
-        return;
-      }
-
-      if (e.code === "Space") {
-        e.preventDefault();
-        player.paused ? player.play() : player.pause();
-      } else if (e.code === "ArrowLeft") {
-        e.preventDefault();
-        seekTo(Math.max(0, player.currentTime - (e.ctrlKey ? 30 : 5)));
-      } else if (e.code === "ArrowRight") {
-        e.preventDefault();
-        seekTo(player.currentTime + (e.ctrlKey ? 30 : 5));
-      } else if (e.code === "KeyS") {
-        e.preventDefault();
-        insertSectionInput(Math.floor(player.currentTime));
-      } else if (e.code === "KeyN") {
-        e.preventDefault();
-        const t = Math.floor(player.currentTime);
-        if (e.shiftKey) {
-          // Shift+N: start or end a range note
-          if (_noteRangeStart === null) {
-            _noteRangeStart = { seconds: t };
-            document.getElementById("note-range-indicator").style.display = "";
-          } else {
-            document.getElementById("note-range-indicator").style.display = "none";
-            insertNoteInput(t, true);
-          }
-        } else {
-          // n: instantaneous note
-          _noteRangeStart = null;
-          insertNoteInput(t, false);
-        }
-      }
-    });
-  }
+  // Hotkeys are now set up in the module script above via attachMediaHotkeys.
 
   // ---------------------------------------------------------------------------
   // Default video size + resizers
@@ -983,10 +897,7 @@
   // ---------------------------------------------------------------------------
   // Utilities
   // ---------------------------------------------------------------------------
-  function secondsToTs(s) {
-    return [Math.floor(s/3600), Math.floor((s%3600)/60), s%60]
-      .map(n => String(n).padStart(2,"0")).join(":");
-  }
+  // secondsToTs imported from player.js
 
   function seekTo(t) {
     const player = window.__vds;
@@ -1510,7 +1421,6 @@
   function init() {
     _ensureImplicitStartHeader();
     attachTranscriptHandlers();
-    attachHotkeyHandlers();
     attachResizers();
 
     attachTimelineHandlers();
@@ -1520,6 +1430,9 @@
     };
     tryInit();
   }
+
+  // Expose for inline onclick handler
+  window.cancelNoteRange = cancelNoteRange;
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

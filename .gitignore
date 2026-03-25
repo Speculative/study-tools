@@ -13,6 +13,7 @@ wheels/
 vtt/
 mp4/
 md/
-coding.db
+*.db
 *.ipynb
 autopsy-analysis/
+node_modules/
