@@ -1334,6 +1334,24 @@
           points: `${x1},${noteY} ${x1+d},${noteY+d} ${x1},${noteY+d*2} ${x1-d},${noteY+d}`,
           fill: "#fbbf24", stroke: "#d97706", "stroke-width": 1,
         }));
+        // Invisible drag handle to convert instant → range
+        const dragHandle = _svgEl("rect", {
+          x: x1 - 6, y: noteY - 2, width: 12, height: d * 2 + 4,
+          fill: "transparent", style: "cursor:ew-resize",
+        });
+        dragHandle.addEventListener("mousedown", (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          const container = document.getElementById("timeline-container");
+          _noteDrag = {
+            noteId: note.id,
+            edge: "instant-to-range",
+            origStart: note.start_seconds,
+            origEnd:   null,
+            containerRect: container.getBoundingClientRect(),
+          };
+        });
+        g.appendChild(dragHandle);
       }
 
       // Tooltip
@@ -1419,16 +1437,44 @@
       const note = _notes.find(n => n.id === _noteDrag.noteId);
       if (!note) return;
 
-      let newStart = note.start_seconds;
-      let newEnd   = note.end_seconds;
-      if (_noteDrag.edge === "start") {
-        newStart = Math.min(t, note.end_seconds - 0.5);
+      if (_noteDrag.edge === "instant-to-range") {
+        const orig = _noteDrag.origStart;
+        const minDelta = (_tlDuration() || 1) / _tlWidth() * 4; // ~4px threshold
+        const delta = t - orig;
+        if (Math.abs(delta) < minDelta) {
+          // Within cancel threshold — show as instant
+          note.start_seconds = orig;
+          note.end_seconds   = null;
+        } else if (delta > 0) {
+          // Dragging right: original is start, drag point is end
+          note.start_seconds = orig;
+          note.end_seconds   = t;
+        } else {
+          // Dragging left: drag point is start, original is end
+          note.start_seconds = t;
+          note.end_seconds   = orig;
+        }
+      } else if (_noteDrag.edge === "start") {
+        const minDelta = (_tlDuration() || 1) / _tlWidth() * 4;
+        if (_noteDrag.origEnd - t < minDelta) {
+          // Collapsed back to instant at the fixed end
+          note.start_seconds = _noteDrag.origEnd;
+          note.end_seconds   = null;
+        } else {
+          note.start_seconds = Math.min(t, _noteDrag.origEnd - minDelta);
+          note.end_seconds   = _noteDrag.origEnd;
+        }
       } else {
-        newEnd = Math.max(t, note.start_seconds + 0.5);
+        const minDelta = (_tlDuration() || 1) / _tlWidth() * 4;
+        if (t - _noteDrag.origStart < minDelta) {
+          // Collapsed back to instant at the fixed start
+          note.start_seconds = _noteDrag.origStart;
+          note.end_seconds   = null;
+        } else {
+          note.start_seconds = _noteDrag.origStart;
+          note.end_seconds   = Math.max(t, _noteDrag.origStart + minDelta);
+        }
       }
-      // Optimistically update in-memory for live feedback
-      note.start_seconds = newStart;
-      note.end_seconds   = newEnd;
       renderTimeline();
     });
 
@@ -1439,8 +1485,17 @@
       _noteDragJustEnded = true;
       const note = _notes.find(n => n.id === drag.noteId);
       if (!note) return;
-      // Persist only if actually changed
-      if (note.start_seconds !== drag.origStart || note.end_seconds !== drag.origEnd) {
+      if (drag.edge === "instant-to-range") {
+        if (note.end_seconds != null) {
+          // Committed conversion — persist
+          await _patchNoteTiming(drag.noteId, note.start_seconds, note.end_seconds);
+        } else {
+          // Cancelled — restore original instant time
+          note.start_seconds = drag.origStart;
+          note.end_seconds   = null;
+          renderTimeline();
+        }
+      } else if (note.start_seconds !== drag.origStart || note.end_seconds !== drag.origEnd) {
         await _patchNoteTiming(drag.noteId, note.start_seconds, note.end_seconds);
       }
     });
