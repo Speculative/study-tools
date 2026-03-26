@@ -261,47 +261,43 @@
 
 <script type="module">
 import { createPlayer, attachMediaHotkeys, escHtml, secondsToTs } from "{{ url_for('static', filename='player.js') }}";
+import * as store from "{{ url_for('static', filename='codebook-store.js') }}";
 
 // ---------------------------------------------------------------------------
-// State
+// Initialise store from server-rendered data
 // ---------------------------------------------------------------------------
-let _dragging = null;   // { noteId, fromCodeId, el }
+{
+  const noteDefs = [];
+  document.querySelectorAll(".note-chip").forEach(chip => {
+    const ds = chip.dataset;
+    noteDefs.push({
+      id: +ds.noteId, pid: ds.pid || "", text: ds.text || "",
+      start: +(ds.start || 0), end: ds.end ? +ds.end : null,
+      condition: ds.condition || "",
+    });
+  });
+  // Deduplicate (a note can appear in multiple bins)
+  const seen = new Set();
+  const uniqueNotes = noteDefs.filter(n => { if (seen.has(n.id)) return false; seen.add(n.id); return true; });
+
+  const codeDefs = [...document.querySelectorAll('.code-bin[data-code-id]:not([data-code-id="uncategorized"])')].map(bin => ({
+    id: +bin.dataset.codeId,
+    name: bin.querySelector(".code-name")?.textContent?.trim() || "",
+    noteIds: [...bin.querySelectorAll(".note-chip")].map(c => +c.dataset.noteId),
+  }));
+
+  const hiddenIds = [...document.querySelectorAll('#hidden-note-list .note-chip')].map(
+    c => +c.dataset.noteId
+  );
+
+  store.init(codeDefs, uniqueNotes, hiddenIds);
+}
+
+// ---------------------------------------------------------------------------
+// Drag state
+// ---------------------------------------------------------------------------
+let _dragging = null;   // { noteId, fromCodeId, el, clone }
 let _dropTarget = null; // { codeId }
-
-// ---------------------------------------------------------------------------
-// Chip factory
-// ---------------------------------------------------------------------------
-function makeChip(noteId, pid, startSeconds, end, ts, text, condition, inCode) {
-  const d = document.createElement("div");
-  d.className = chipClass(inCode);
-  d.draggable = true;
-  d.dataset.noteId = String(noteId);
-  d.dataset.pid = pid;
-  d.dataset.start = String(startSeconds);
-  if (end) d.dataset.end = String(end);
-  if (condition) d.dataset.condition = condition;
-  const hideBtnClass = inCode ? "hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none" : "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
-  d.innerHTML =
-    `<span class="${metaClass(inCode)}">${escHtml(pid)}·${escHtml(ts)} </span>` +
-    `<span class="text-gray-800">${escHtml(text)}</span>` +
-    `<button class="${hideBtnClass}" onclick="event.stopPropagation(); hideNote(this)" title="Hide">×</button>`;
-  return d;
-}
-
-function chipTs(chip) {
-  const start = +chip.dataset.start;
-  const end = chip.dataset.end;
-  return end ? `${secondsToTs(start)}–${secondsToTs(+end)}` : secondsToTs(start);
-}
-
-function chipClass(inCode) {
-  return inCode
-    ? "note-chip border border-blue-200 bg-blue-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none"
-    : "note-chip border border-gray-200 bg-gray-50 rounded px-2.5 py-1.5 text-sm cursor-grab select-none";
-}
-function metaClass(inCode) {
-  return inCode ? "text-blue-300 text-xs mr-1" : "text-gray-400 text-xs mr-1";
-}
 
 // ---------------------------------------------------------------------------
 // Drag start / end
@@ -382,29 +378,19 @@ document.addEventListener("drop", async e => {
   const inCode = toCodeId !== "uncategorized";
   const toList = inCode ? toBin.querySelector(".note-list") : toBin.querySelector(".bin-body");
 
-  // In clone mode, make a fresh chip to insert; original stays in place
   // No-op: dropped back into the same uncategorized container
   if (!isClone && fromCodeId === toCodeId) return;
 
-  const activeChip = isClone ? makeChip(
-    noteId,
-    chip.dataset.pid,
-    +chip.dataset.start,
-    chip.dataset.end || "",
-    chipTs(chip),
-    chip.dataset.text,
-    chip.dataset.condition || "",
-    inCode,
-  ) : chip;
+  const note = store.getNote(noteId);
+  if (!note) return;
+  const context = inCode ? "code" : "uncategorized";
+
+  const activeChip = isClone
+    ? store.buildChip(note, context, (btn) => hideNote(btn))
+    : chip;
 
   if (!isClone) {
-    // Update chip styling for move
-    activeChip.className = chipClass(inCode);
-    activeChip.querySelector("span").className = metaClass(inCode);
-    const hbtn = activeChip.querySelector(".hide-btn");
-    if (hbtn) hbtn.className = inCode
-      ? "hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none"
-      : "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
+    store.restyleChip(activeChip, context, (btn) => hideNote(btn));
   }
 
   // Insert in sorted order for code bins; uncategorized gets appended (it re-sorts on reload)
@@ -420,30 +406,21 @@ document.addEventListener("drop", async e => {
     if (fromBin) updateCount(fromBin);
   }
 
-  // --- Persist ---
+  // --- Persist via store ---
   const movedBetweenCodes = fromCodeId !== toCodeId;
 
   if (isClone) {
-    if (inCode) {
-      await fetch(`/api/codes/${toCodeId}/notes/${noteId}`, { method: "POST" });
-    }
+    if (inCode) await store.assignNote(+toCodeId, noteId);
   } else if (movedBetweenCodes) {
-    if (inCode) {
-      await fetch(`/api/codes/${toCodeId}/notes/${noteId}`, { method: "POST" });
-    }
+    if (inCode) await store.assignNote(+toCodeId, noteId);
     if (fromCodeId && fromCodeId !== "uncategorized") {
-      await fetch(`/api/codes/${fromCodeId}/notes/${noteId}`, { method: "DELETE" });
+      await store.unassignNote(+fromCodeId, noteId);
     }
   }
 
-  // If dropped onto uncategorized, check whether other code bins still hold this note.
-  // If so, this was a "copy" — don't actually show it in uncategorized; remove the chip.
+  // If dropped onto uncategorized, check whether note is still in any code.
   if (!isClone && !inCode && movedBetweenCodes) {
-    const otherBins = [...document.querySelectorAll(`.code-bin:not([data-code-id="uncategorized"])`)];
-    const stillCoded = otherBins.some(b =>
-      b.querySelector(`.note-chip[data-note-id="${noteId}"]`)
-    );
-    if (stillCoded) {
+    if (store.isAssigned(noteId)) {
       chip.remove();
       updateCount(toBin);
     }
@@ -476,13 +453,8 @@ async function submitNewCode() {
   const input = document.getElementById("new-code-input");
   const name = input.value.trim();
   if (!name) return;
-  const res = await fetch("/api/codes", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  if (!res.ok) return;
-  const code = await res.json();
+  const code = await store.addCode(name);
+  if (!code) return;
   hideNewCodeInput();
   insertCodeBin(code);
 }
@@ -505,7 +477,7 @@ function insertCodeBin(code) {
     </div>
     <div class="note-list bin-body px-4 py-2 flex flex-wrap gap-2 min-h-10 relative"></div>
   `;
-  document.getElementById("codebook").insertBefore(bin, anchor);
+  document.getElementById("right-col").insertBefore(bin, anchor);
 }
 
 // ---------------------------------------------------------------------------
@@ -569,11 +541,7 @@ function startRenameCode(nameEl, codeId) {
     const span = document.createElement("span");
     span.className = "code-name font-semibold text-blue-800 text-sm";
     if (save && name && name !== current) {
-      await fetch(`/api/codes/${codeId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
+      await store.renameCode(codeId, name);
       span.textContent = name;
     } else {
       span.textContent = current;
@@ -594,20 +562,11 @@ function startRenameCode(nameEl, codeId) {
 // ---------------------------------------------------------------------------
 async function deleteCode(codeId) {
   if (!confirm("Delete this code? Notes will return to Uncategorized.")) return;
-  const res = await fetch(`/api/codes/${codeId}`, { method: "DELETE" });
-  if (!res.ok) return;
+  await store.deleteCodeInStore(codeId);
   const bin = document.getElementById(`bin-${codeId}`);
   const uncatBody = document.querySelector("#bin-uncategorized .bin-body");
   bin.querySelectorAll(".note-chip").forEach(chip => {
-    chip.className = chipClass(false);
-    chip.querySelector("span").className = metaClass(false);
-    // Remove hide button if present, re-add gray one
-    chip.querySelector(".hide-btn")?.remove();
-    const hb = document.createElement("button");
-    hb.className = "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
-    hb.title = "Hide"; hb.textContent = "×";
-    hb.onclick = e => { e.stopPropagation(); hideNote(hb); };
-    chip.appendChild(hb);
+    store.restyleChip(chip, "uncategorized", (btn) => { hideNote(btn); });
     uncatBody.appendChild(chip);
   });
   updateCount(document.getElementById("bin-uncategorized"));
@@ -620,6 +579,8 @@ async function deleteCode(codeId) {
 async function hideNote(btn) {
   const chip = btn.closest(".note-chip");
   const noteId = +chip.dataset.noteId;
+  const note = store.getNote(noteId);
+  if (!note) return;
 
   // Count how many visible bins currently hold this note
   const allChips = [...document.querySelectorAll(`.note-chip[data-note-id="${noteId}"]`)];
@@ -629,71 +590,37 @@ async function hideNote(btn) {
     // Note exists elsewhere — remove from this code only
     const bin = chip.closest(".code-bin");
     if (bin && bin.dataset.codeId !== "uncategorized") {
-      await fetch(`/api/codes/${bin.dataset.codeId}/notes/${noteId}`, { method: "DELETE" });
+      await store.unassignNote(+bin.dataset.codeId, noteId);
     }
     chip.remove();
     if (bin) updateCount(bin);
     return;
   }
 
-  // Last occurrence — mark hidden in DB and move to Hidden section
-  await fetch(`/api/notes/${noteId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ hidden: true }),
-  });
+  // Last occurrence — mark hidden and move to Hidden section
+  await store.hideNoteInStore(noteId);
 
   const bin = chip.closest(".code-bin") || document.getElementById("bin-uncategorized");
   chip.remove();
   if (bin) updateCount(bin);
 
-  // Restyle and move chip into hidden section
-  const hiddenList = document.getElementById("hidden-note-list");
-  chip.className = "note-chip note-chip-hidden border border-gray-200 bg-gray-100 rounded px-2.5 py-1.5 text-sm cursor-grab select-none opacity-50";
-  chip.dataset.hidden = "1";
-
-  btn.remove();
-  const unhideBtn = document.createElement("button");
-  unhideBtn.className = "ml-1 text-gray-400 hover:text-blue-500 text-xs";
-  unhideBtn.title = "Unhide";
-  unhideBtn.textContent = "↩";
-  unhideBtn.onclick = e => { e.stopPropagation(); unhideNote(unhideBtn); };
-  chip.querySelector("span").className = "text-gray-400 text-xs mr-1";
-  const textSpan = chip.querySelectorAll("span")[1];
-  if (textSpan) textSpan.className = "text-gray-500";
-  chip.appendChild(unhideBtn);
-  hiddenList.appendChild(chip);
-
+  // Build a fresh hidden-style chip
+  const hiddenChip = store.buildChip(note, "hidden", (b) => unhideNote(b));
+  document.getElementById("hidden-note-list").appendChild(hiddenChip);
   updateHiddenCount();
 }
 
 async function unhideNote(btn) {
   const chip = btn.closest(".note-chip");
   const noteId = +chip.dataset.noteId;
+  const note = store.getNote(noteId);
+  if (!note) return;
 
-  await fetch(`/api/notes/${noteId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ hidden: false }),
-  });
-
-  // Move chip to uncategorized
-  chip.className = chipClass(false);
-  chip.dataset.hidden = "0";
-  btn.remove();
-  const hideBtn = document.createElement("button");
-  hideBtn.className = "hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
-  hideBtn.title = "Hide";
-  hideBtn.textContent = "×";
-  hideBtn.onclick = e => { e.stopPropagation(); hideNote(hideBtn); };
-  chip.querySelector("span").className = metaClass(false);
-  const textSpan = chip.querySelectorAll("span")[1];
-  if (textSpan) textSpan.className = "text-gray-800";
-  chip.appendChild(hideBtn);
+  await store.unhideNoteInStore(noteId);
 
   chip.remove();
-  const uncatBody = document.querySelector("#bin-uncategorized .bin-body");
-  uncatBody.appendChild(chip);
+  const uncatChip = store.buildChip(note, "uncategorized", (b) => hideNote(b));
+  document.querySelector("#bin-uncategorized .bin-body").appendChild(uncatChip);
   updateCount(document.getElementById("bin-uncategorized"));
   updateHiddenCount();
 }
@@ -709,8 +636,6 @@ function toggleHiddenBin() {
   const collapsed = list.classList.toggle("hidden");
   chevron.textContent = collapsed ? "▶" : "▼";
 }
-
-// escHtml imported from player.js
 
 // ---------------------------------------------------------------------------
 // Video lightbox (Vidstack)
@@ -790,13 +715,9 @@ async function saveLightboxNote() {
   btn.disabled = true;
   btn.textContent = "Saving…";
 
-  const res = await fetch(`/api/notes/${_lbNoteId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: newText }),
-  });
+  const ok = await store.updateNoteText(_lbNoteId, newText);
 
-  if (res.ok) {
+  if (ok) {
     // Update all matching chips in the DOM
     document.querySelectorAll(`.note-chip[data-note-id="${_lbNoteId}"]`).forEach(chip => {
       chip.dataset.text = newText;
