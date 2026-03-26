@@ -451,8 +451,14 @@ def codebook():
             condition = _condition_for(pid, sec_name)
             for n in notes:
                 n["condition"] = condition
-            sections.append({"name": sec_name, "notes": notes})
-        all_groups_data.append({"pid": pid, "sections": sections})
+            sections.append({
+                "name": sec_name,
+                "notes": notes,
+                "task_props": _task_props_for_section(pid, sec_name),
+            })
+        pid_cells = sheet_cells.get(pid, {})
+        notes_prop = pid_cells.get(_notes_col_id, "") if _notes_col_id is not None else ""
+        all_groups_data.append({"pid": pid, "sections": sections, "notes_prop": notes_prop})
 
     # For each code, fetch its notes ordered by pid then start time
     for c in code_list:

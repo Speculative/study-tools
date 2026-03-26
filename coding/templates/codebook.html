@@ -557,6 +557,7 @@ function _insertAllNoteChips() {
         `<span class="pid-chevron text-gray-300 text-xs">▼</span>` +
         `<span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">${escHtml(group.pid)}</span>` +
         `<span class="text-xs text-gray-300 pid-count"></span>` +
+        (group.notes_prop ? `<span class="text-xs text-gray-400 italic">${escHtml(group.notes_prop)}</span>` : "") +
         `</div><div class="pid-body flex flex-col gap-2 pl-3"></div>`;
       // Insert in sorted pid order
       const after = [...binBody.querySelectorAll(".pid-group")].find(g => g.dataset.pid > group.pid);
@@ -578,11 +579,14 @@ function _insertAllNoteChips() {
         secGroup.dataset.sec = sec.name;
         secGroup.dataset.allNotes = "1";
         if (sec.name) {
+          const taskPropsHtml = sec.task_props?.length
+            ? `<span class="text-xs text-gray-400">(${escHtml(sec.task_props.join(", "))})</span>` : "";
           secGroup.innerHTML =
             `<div class="sec-header flex items-center gap-1.5 cursor-pointer select-none mb-1" onclick="toggleSecGroup(this)">` +
             `<span class="sec-chevron text-gray-300 text-xs">▼</span>` +
             `<span class="text-xs text-gray-400 italic">${escHtml(sec.name)}</span>` +
             `<span class="text-xs text-gray-300 sec-count"></span>` +
+            taskPropsHtml +
             `</div><div class="sec-body flex flex-wrap gap-2 pl-3"></div>`;
         } else {
           secGroup.innerHTML = `<div class="sec-body flex flex-wrap gap-2"></div>`;
