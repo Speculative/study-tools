@@ -317,15 +317,17 @@ document.addEventListener("dragstart", e => {
   const chip = e.target.closest(".note-chip");
   if (!chip) return;
   const bin = chip.closest(".code-bin");
+  const forceClone = chip.classList.contains("all-notes-chip");
+  const isClone = forceClone || e.ctrlKey;
   _dragging = {
     noteId: +chip.dataset.noteId,
     fromCodeId: bin ? bin.dataset.codeId : null,
     el: chip,
-    clone: e.ctrlKey,
+    clone: isClone,
   };
   // Use rAF so the chip hasn't visually moved yet when screenshot is taken
-  e.dataTransfer.effectAllowed = e.ctrlKey ? "copy" : "move";
-  requestAnimationFrame(() => chip.classList.add(e.ctrlKey ? "dragging-clone" : "dragging"));
+  e.dataTransfer.effectAllowed = isClone ? "copy" : "move";
+  requestAnimationFrame(() => chip.classList.add(isClone ? "dragging-clone" : "dragging"));
 });
 
 document.addEventListener("dragend", () => {
@@ -556,7 +558,10 @@ function _insertAllNoteChips() {
         `<span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">${escHtml(group.pid)}</span>` +
         `<span class="text-xs text-gray-300 pid-count"></span>` +
         `</div><div class="pid-body flex flex-col gap-2 pl-3"></div>`;
-      binBody.appendChild(pidGroup);
+      // Insert in sorted pid order
+      const after = [...binBody.querySelectorAll(".pid-group")].find(g => g.dataset.pid > group.pid);
+      if (after) binBody.insertBefore(pidGroup, after);
+      else binBody.appendChild(pidGroup);
     }
     const pidBody = pidGroup.querySelector(".pid-body");
 
@@ -591,10 +596,8 @@ function _insertAllNoteChips() {
         if (!note) continue;
         const chip = store.buildChip(note, "uncategorized", () => {});
         chip.querySelector(".hide-btn")?.remove();
-        chip.draggable = false;
         chip.classList.add("all-notes-chip");
         chip.style.opacity = "0.45";
-        chip.style.cursor = "default";
         // Insert in start-time order
         const siblings = [...secBody.querySelectorAll(".note-chip")];
         const after = siblings.find(c => +c.dataset.start > note.start);
