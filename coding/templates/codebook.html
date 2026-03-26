@@ -141,6 +141,16 @@
     <!-- Right column: named codes + new code -->
     <div id="right-col" class="flex flex-col gap-4 overflow-y-auto overflow-x-hidden p-4 flex-1 min-w-0">
 
+      <!-- Code search bar (shown on Ctrl+F) -->
+      <div id="code-search-bar" class="hidden flex items-center gap-2 bg-white border border-blue-300 rounded px-2 py-1 shadow-sm">
+        <span class="text-xs text-gray-400">🔍</span>
+        <input id="code-search-input" type="text" class="flex-1 text-sm focus:outline-none" placeholder="Filter codes…"
+          oninput="filterCodes(this.value)"
+          onkeydown="if(event.key==='Escape'){closeCodeSearch();}"
+        />
+        <button class="text-gray-300 hover:text-gray-500 text-sm leading-none" onclick="closeCodeSearch()">×</button>
+      </div>
+
       <!-- Collapse/expand all codes -->
       <div class="flex gap-1 justify-end" onclick="event.stopPropagation()">
         <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllCodes(true)">collapse all</button>
@@ -838,7 +848,41 @@ document.getElementById("lightbox-overlay").addEventListener("click", e => {
 
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") closeLightbox();
+  if (e.key === "f" && (e.ctrlKey || e.metaKey)) {
+    const lightboxOpen = !document.getElementById("lightbox-overlay").classList.contains("hidden");
+    if (!lightboxOpen) {
+      e.preventDefault();
+      openCodeSearch();
+    }
+  }
 });
+
+// ---------------------------------------------------------------------------
+// Code search / filter
+// ---------------------------------------------------------------------------
+function openCodeSearch() {
+  const bar = document.getElementById("code-search-bar");
+  bar.classList.remove("hidden");
+  document.getElementById("code-search-input").focus();
+}
+
+function closeCodeSearch() {
+  document.getElementById("code-search-bar").classList.add("hidden");
+  document.getElementById("code-search-input").value = "";
+  filterCodes("");
+}
+
+function filterCodes(query) {
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll("#right-col .code-bin").forEach(bin => {
+    if (!q) {
+      bin.classList.remove("hidden");
+      return;
+    }
+    const name = bin.querySelector(".code-name")?.textContent.toLowerCase() ?? "";
+    bin.classList.toggle("hidden", !name.includes(q));
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Video lightbox (Vidstack) — player management
@@ -930,6 +974,7 @@ Object.assign(window, {
   toggleHiddenBin, hideNote, unhideNote, deleteCode, startRenameCode,
   showNewCodeInput, hideNewCodeInput, submitNewCode, handleNewCodeKey,
   closeLightbox, saveLightboxNote, openLightbox, toggleAllNotes, collapseAllCodes, toggleGroupByPid,
+  openCodeSearch, closeCodeSearch, filterCodes,
 });
 
 // ---------------------------------------------------------------------------
