@@ -5,36 +5,111 @@
 {% block body %}
 <style>
   tr.transcript-active { background: #eff6ff !important; }
+
+  /* Layout shell */
+  .s-page    { display:flex; flex-direction:column; height:100vh; width:100vw; overflow:hidden; }
+  .s-header  { flex:0 0 auto; padding:8px 16px; border-bottom:1px solid #e5e7eb; background:#f9fafb; display:flex; align-items:center; gap:12px; }
+  .s-main    { flex:1 1 0; display:flex; min-height:0; overflow:hidden; }
+  .s-left    { display:flex; flex-direction:column; min-width:0; overflow:hidden; flex:0 0 75%; }
+  .s-video   { flex:1 1 0; min-height:0; background:#000; overflow:hidden; display:flex; align-items:center; justify-content:center; position:relative; }
+  .s-tools   { flex:1; min-height:80px; overflow:hidden; background:#f3f4f6; border-top:1px solid #e5e7eb; display:flex; flex-direction:column; }
+  .s-tl-wrap { flex:1 1 0; min-height:0; position:relative; cursor:crosshair; }
+  .s-tl-svg  { width:100%; height:100%; display:block; overflow:visible; }
+  .s-tcol    { flex:0 0 25%; display:flex; flex-direction:column; min-width:0; overflow:hidden; background:#fff; border-left:1px solid #e5e7eb; }
+  .s-tcol-hd { flex:0 0 auto; padding:10px 16px; border-bottom:1px solid #e5e7eb; font-weight:600; font-size:0.9rem; }
+  .s-tscroll { flex:1 1 0; overflow-y:auto; overflow-x:hidden; }
+
+  /* Resize handles */
+  .s-resize    { flex:0 0 5px; background:#e5e7eb; user-select:none; }
+  .s-resize-h  { cursor:row-resize; }
+  .s-resize-v  { cursor:col-resize; }
+
+  /* Transcript table */
+  .s-table   { width:100%; table-layout:fixed; border-collapse:collapse; font-size:0.85rem; }
+  .s-thead   { position:sticky; top:0; background:#fff; z-index:1; }
+  .s-thead tr { border-bottom:1px solid #e5e7eb; }
+  .s-th      { text-align:left; padding:6px 8px; white-space:nowrap; }
+
+  /* Cell base */
+  .s-td      { padding:5px 8px; }
+
+  /* Transcript row (utterance) */
+  .s-utt     { cursor:pointer; border-top:1px solid #f3f4f6; }
+  .s-utt-ts  { color:#6b7280; white-space:nowrap; overflow:hidden; }
+  .s-utt-spk { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .s-utt-txt { word-break:break-word; }
+
+  /* Section header row */
+  .s-sec     { background:#f0f4ff; cursor:pointer; border-top:2px solid #c7d2fe; }
+  .s-sec-ts  { color:#6b7280; white-space:nowrap; font-size:0.8rem; }
+  .s-sec-name { font-weight:600; color:#3730a3; }
+  .s-sec-toggle { margin-right:4px; font-size:0.75rem; }
+  .s-sec-del { float:right; font-size:0.75rem; color:#9ca3af; background:none; border:none; cursor:pointer; padding:0 4px; }
+
+  /* Note row */
+  .s-note    { border-top:1px solid #fde68a; background:#fffbeb; cursor:pointer; }
+  .s-note-ts { color:#92400e; white-space:nowrap; overflow:hidden; font-size:0.8rem; }
+  .s-note-type { color:#92400e; font-size:0.75rem; white-space:nowrap; }
+  .s-note-txt { word-break:break-word; color:#78350f; }
+  .s-note-text { cursor:text; }
+  .s-note-del { float:right; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer; padding:0 2px; line-height:1; }
+
+  /* Note range indicator */
+  .s-range-ind { flex:0 0 auto; padding:2px 12px 4px; font-size:0.75rem; color:#92400e; background:#fef3c7; }
+  .s-range-kbd { font-size:0.7rem; padding:0 3px; border:1px solid #d97706; border-radius:2px; }
+  .s-range-cancel { margin-left:8px; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer; }
+
+  /* Input rows */
+  .s-input-sec { background:#fefce8; border-top:2px solid #fbbf24; }
+  .s-input-note { background:#fffbeb; border-top:2px solid #fbbf24; }
+  .s-input-field { font-size:0.85rem; padding:2px 4px; border:1px solid #fbbf24; border-radius:3px; background:transparent; }
+  .s-note-label { font-size:0.75rem; color:#92400e; margin-right:6px; }
+  .s-edit-field { width:100%; font-size:0.85rem; padding:1px 3px; border:1px solid #fbbf24; border-radius:3px; background:#fff; color:#78350f; }
+
+  /* Ghost autocomplete */
+  .s-ghost    { position:absolute; left:0; top:0; padding:2px 4px; font-size:0.85rem; pointer-events:none; white-space:pre; z-index:0; }
+  .s-ghost-wrap { position:relative; display:flex; align-items:center; }
+
+  /* Focus banner */
+  .s-focus-banner { position:sticky; top:0; z-index:10; background:#3730a3; color:#e0e7ff; padding:4px 10px; font-size:0.8rem; font-weight:600; display:flex; justify-content:space-between; align-items:center; cursor:pointer; }
+  .s-focus-hint { font-size:0.75rem; opacity:0.8; }
+
+  /* Empty transcript */
+  .s-empty   { padding:10px 8px; color:#6b7280; }
+
+  /* Header link / pid */
+  .s-back    { font-size:0.85rem; color:#2563eb; }
+  .s-pid     { font-weight:600; }
 </style>
-<div style="display:flex; flex-direction:column; height:100vh; width:100vw; overflow:hidden;">
+<div class="s-page">
 
   <!-- Header bar -->
-  <div style="flex:0 0 auto; padding:8px 16px; border-bottom:1px solid #e5e7eb; background:#f9fafb; display:flex; align-items:center; gap:12px;">
-    <a href="/" style="font-size:0.85rem; color:#2563eb;">← Participants</a>
-    <span style="font-weight:600;">{{ pid }}</span>
+  <div class="s-header">
+    <a href="/" class="s-back">← Participants</a>
+    <span class="s-pid">{{ pid }}</span>
   </div>
 
   <!-- Main area -->
-  <div id="main-area" style="flex:1 1 0; display:flex; min-height:0; overflow:hidden;">
+  <div id="main-area" class="s-main">
 
     <!-- Left column: video + hresize + tools -->
-    <div id="left-col" style="display:flex; flex-direction:column; min-width:0; overflow:hidden; flex:0 0 75%;">
+    <div id="left-col" class="s-left">
 
-      <div id="video-pane" style="flex:1 1 0; min-height:0; background:#000; overflow:hidden; display:flex; align-items:center; justify-content:center; position:relative;">
-        <div id="player-target" style="width:100%; height:100%;"></div>
+      <div id="video-pane" class="s-video">
+        <div id="player-target" class="w-full h-full"></div>
       </div>
 
-      <div id="hresize" style="flex:0 0 5px; background:#e5e7eb; cursor:row-resize; user-select:none;" title="Drag to resize · Double-click to fit"></div>
+      <div id="hresize" class="s-resize s-resize-h" title="Drag to resize · Double-click to fit"></div>
 
-      <div id="tools-pane" style="flex:1; min-height:80px; overflow:hidden; background:#f3f4f6; border-top:1px solid #e5e7eb; display:flex; flex-direction:column;">
+      <div id="tools-pane" class="s-tools">
         <!-- Note range indicator -->
-        <div id="note-range-indicator" style="display:none; flex:0 0 auto; padding:2px 12px 4px; font-size:0.75rem; color:#92400e; background:#fef3c7;">
-          ⏺ Range note started — press <kbd style="font-size:0.7rem; padding:0 3px; border:1px solid #d97706; border-radius:2px;">Shift+N</kbd> to end
-          <button onclick="cancelNoteRange()" style="margin-left:8px; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer;">✕ cancel</button>
+        <div id="note-range-indicator" class="s-range-ind" style="display:none">
+          ⏺ Range note started — press <kbd class="s-range-kbd">Shift+N</kbd> to end
+          <button onclick="cancelNoteRange()" class="s-range-cancel">✕ cancel</button>
         </div>
         <!-- Timeline -->
-        <div id="timeline-container" style="flex:1 1 0; min-height:0; position:relative; cursor:crosshair;">
-          <svg id="timeline-svg" style="width:100%; height:100%; display:block; overflow:visible;">
+        <div id="timeline-container" class="s-tl-wrap">
+          <svg id="timeline-svg" class="s-tl-svg">
             <defs>
               <clipPath id="timeline-clip">
                 <rect id="timeline-clip-rect" x="0" y="0" width="100%" height="100%"/>
@@ -57,70 +132,66 @@
 
     </div>
 
-    <div id="vresize" style="flex:0 0 5px; background:#e5e7eb; cursor:col-resize; user-select:none;" title="Drag to resize · Double-click to fit"></div>
+    <div id="vresize" class="s-resize s-resize-v" title="Drag to resize · Double-click to fit"></div>
 
     <!-- Transcript panel -->
-    <div id="transcript-col" style="flex:0 0 25%; display:flex; flex-direction:column; min-width:0; overflow:hidden; background:#fff; border-left:1px solid #e5e7eb;">
-      <div style="flex:0 0 auto; padding:10px 16px; border-bottom:1px solid #e5e7eb; font-weight:600; font-size:0.9rem;">Transcript</div>
-      <div id="transcript-scroll" style="flex:1 1 0; overflow-y:auto; overflow-x:hidden;">
-        <table style="width:100%; table-layout:fixed; border-collapse:collapse; font-size:0.85rem;">
+    <div id="transcript-col" class="s-tcol">
+      <div class="s-tcol-hd">Transcript</div>
+      <div id="transcript-scroll" class="s-tscroll">
+        <table class="s-table">
           <colgroup>
             <col style="width:60px;">
             <col style="width:90px;">
             <col>
           </colgroup>
-          <thead style="position:sticky; top:0; background:#fff; z-index:1;">
-            <tr style="border-bottom:1px solid #e5e7eb;">
-              <th style="text-align:left; padding:6px 8px; white-space:nowrap;">Time</th>
-              <th style="text-align:left; padding:6px 8px; white-space:nowrap;">Speaker</th>
-              <th style="text-align:left; padding:6px 8px;">Text</th>
+          <thead class="s-thead">
+            <tr>
+              <th class="s-th">Time</th>
+              <th class="s-th">Speaker</th>
+              <th class="s-th">Text</th>
             </tr>
           </thead>
           <tbody id="transcript-body">
             {% for row in rows %}
               {% if row.type == "section" %}
-                <tr class="section-header"
+                <tr class="section-header s-sec"
                     data-section-id="{{ row.id }}"
-                    data-section-start="{{ row.start_seconds }}"
-                    style="background:#f0f4ff; cursor:pointer; border-top:2px solid #c7d2fe;">
-                  <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; font-size:0.8rem;">{{ row.start_ts }}</td>
-                  <td colspan="2" style="padding:5px 8px; font-weight:600; color:#3730a3;">
-                    <span class="section-toggle" style="margin-right:4px; font-size:0.75rem;">▼</span>{{ row.name }}
-                    <button class="section-delete-btn"
+                    data-section-start="{{ row.start_seconds }}">
+                  <td class="s-td s-sec-ts">{{ row.start_ts }}</td>
+                  <td colspan="2" class="s-td s-sec-name">
+                    <span class="section-toggle s-sec-toggle">▼</span>{{ row.name }}
+                    <button class="section-delete-btn s-sec-del"
                             data-section-id="{{ row.id }}"
-                            style="float:right; font-size:0.75rem; color:#9ca3af; background:none; border:none; cursor:pointer; padding:0 4px;"
                             title="Delete section">✕</button>
                   </td>
                 </tr>
               {% elif row.type in ("note_instant", "note_start", "note_end") %}
-                <tr class="note-row note-{{ row.type.split('_')[1] }}"
+                <tr class="note-row note-{{ row.type.split('_')[1] }} s-note"
                     data-note-id="{{ row.id }}"
                     data-note-start="{{ row.start_seconds }}"
-                    {% if row.end_seconds %}data-note-end="{{ row.end_seconds }}"{% endif %}
-                    style="border-top:1px solid #fde68a; background:#fffbeb; cursor:pointer;">
-                  <td style="padding:5px 8px; color:#92400e; white-space:nowrap; overflow:hidden; font-size:0.8rem;">
+                    {% if row.end_seconds %}data-note-end="{{ row.end_seconds }}"{% endif %}>
+                  <td class="s-td s-note-ts">
                     {% if row.type == "note_end" %}{{ row.end_ts }}{% else %}{{ row.start_ts }}{% endif %}
                   </td>
-                  <td style="padding:5px 8px; color:#92400e; font-size:0.75rem; white-space:nowrap;">
+                  <td class="s-td s-note-type">
                     {% if row.type == "note_start" %}▶ note{% elif row.type == "note_end" %}◀ note{% else %}♪ note{% endif %}
                   </td>
-                  <td style="padding:5px 8px; word-break:break-word; color:#78350f;">
-                    <span class="note-text" title="Click to edit" style="cursor:text;">{{ row.text }}</span>
-                    <button class="note-delete-btn" data-note-id="{{ row.id }}"
-                            style="float:right; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer; padding:0 2px; line-height:1;">✕</button>
+                  <td class="s-td s-note-txt">
+                    <span class="note-text s-note-text" title="Click to edit">{{ row.text }}</span>
+                    <button class="note-delete-btn s-note-del" data-note-id="{{ row.id }}">✕</button>
                   </td>
                 </tr>
               {% else %}
                 <tr data-start="{{ row.start_seconds }}"
                     data-section-id="{{ row.section_id or '' }}"
-                    style="cursor:pointer; border-top:1px solid #f3f4f6;">
-                  <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; overflow:hidden;">{{ row.start_ts }}</td>
-                  <td style="padding:5px 8px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ row.speaker }}</td>
-                  <td style="padding:5px 8px; word-break:break-word;">{{ row.text }}</td>
+                    class="s-utt">
+                  <td class="s-td s-utt-ts">{{ row.start_ts }}</td>
+                  <td class="s-td s-utt-spk">{{ row.speaker }}</td>
+                  <td class="s-td s-utt-txt">{{ row.text }}</td>
                 </tr>
               {% endif %}
             {% else %}
-              <tr><td style="padding:10px 8px; color:#6b7280;" colspan="3">No transcript available.</td></tr>
+              <tr><td class="s-empty" colspan="3">No transcript available.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -279,8 +350,8 @@
     if (!banner) {
       banner = document.createElement("div");
       banner.id = "focus-banner";
-      banner.style.cssText = "position:sticky; top:0; z-index:10; background:#3730a3; color:#e0e7ff; padding:4px 10px; font-size:0.8rem; font-weight:600; display:flex; justify-content:space-between; align-items:center; cursor:pointer;";
-      banner.innerHTML = `<span></span><span style="font-size:0.75rem; opacity:0.8;">double-click to exit focus</span>`;
+      banner.className = "s-focus-banner";
+      banner.innerHTML = `<span></span><span class="s-focus-hint">double-click to exit focus</span>`;
       banner.addEventListener("dblclick", unfocusSection);
       const scroller = document.getElementById("transcript-scroll");
       if (scroller) scroller.prepend(banner);
@@ -491,14 +562,14 @@
 
     const inputRow = document.createElement("tr");
     inputRow.id = "section-input-row";
-    inputRow.style.cssText = "background:#fefce8; border-top:2px solid #fbbf24;";
+    inputRow.className = "s-input-sec";
     inputRow.innerHTML = `
-      <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; font-size:0.8rem;">${secondsToTs(atSeconds)}</td>
-      <td colspan="2" style="padding:4px 8px;">
-        <div style="position:relative; display:flex; align-items:center;">
-          <span id="section-input-ghost" style="position:absolute; left:0; top:0; padding:2px 4px; font-size:0.85rem; pointer-events:none; white-space:pre; z-index:0;"></span>
+      <td class="s-td s-sec-ts">${secondsToTs(atSeconds)}</td>
+      <td colspan="2" class="s-td">
+        <div class="s-ghost-wrap">
+          <span id="section-input-ghost" class="s-ghost"></span>
           <input id="section-input-field" type="text" placeholder="Section name…"
-                 style="width:100%; font-size:0.85rem; padding:2px 4px; border:1px solid #fbbf24; border-radius:3px; background:transparent; position:relative; z-index:1;" />
+                 class="s-input-field w-full relative z-[1]" />
         </div>
       </td>`;
 
@@ -520,8 +591,8 @@
       if (match) {
         _suggestion = match;
         ghost.innerHTML =
-          `<span style="color:transparent">${escHtml(typed)}</span>` +
-          `<span style="color:#9ca3af">${escHtml(match.slice(typed.length))}</span>`;
+          `<span class="text-transparent">${escHtml(typed)}</span>` +
+          `<span class="text-gray-400">${escHtml(match.slice(typed.length))}</span>`;
       } else {
         ghost.innerHTML = "";
       }
@@ -575,17 +646,15 @@
 
   function buildSectionRow(sec) {
     const tr = document.createElement("tr");
-    tr.className = "section-header";
+    tr.className = "section-header s-sec";
     tr.dataset.sectionId = sec.id;
     tr.dataset.sectionStart = sec.start_seconds;
-    tr.style.cssText = "background:#f0f4ff; cursor:pointer; border-top:2px solid #c7d2fe;";
     tr.innerHTML = `
-      <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; font-size:0.8rem;">${sec.start_ts}</td>
-      <td colspan="2" style="padding:5px 8px; font-weight:600; color:#3730a3;">
-        <span class="section-toggle" style="margin-right:4px; font-size:0.75rem;">▼</span>${escHtml(sec.name)}
-        <button class="section-delete-btn"
+      <td class="s-td s-sec-ts">${sec.start_ts}</td>
+      <td colspan="2" class="s-td s-sec-name">
+        <span class="section-toggle s-sec-toggle">▼</span>${escHtml(sec.name)}
+        <button class="section-delete-btn s-sec-del"
                 data-section-id="${sec.id}"
-                style="float:right; font-size:0.75rem; color:#9ca3af; background:none; border:none; cursor:pointer; padding:0 4px;"
                 title="Delete section">✕</button>
       </td>`;
     return tr;
@@ -628,14 +697,13 @@
     if (!hasPreSectionRows) return;
 
     const tr = document.createElement("tr");
-    tr.className = "section-header section-header-implicit";
+    tr.className = "section-header section-header-implicit s-sec";
     tr.setAttribute("data-section-id", "");
     tr.setAttribute("data-section-start", "0");
-    tr.style.cssText = "background:#f0f4ff; cursor:pointer; border-top:2px solid #c7d2fe;";
     tr.innerHTML = `
-      <td style="padding:5px 8px; color:#6b7280; white-space:nowrap; font-size:0.8rem;">0:00</td>
-      <td colspan="2" style="padding:5px 8px; font-weight:600; color:#3730a3;">
-        <span class="section-toggle" style="margin-right:4px; font-size:0.75rem;">▼</span>Start
+      <td class="s-td s-sec-ts">0:00</td>
+      <td colspan="2" class="s-td s-sec-name">
+        <span class="section-toggle s-sec-toggle">▼</span>Start
       </td>`;
     tbody.prepend(tr);
   }
@@ -679,13 +747,13 @@
 
     const inputRow = document.createElement("tr");
     inputRow.id = "note-input-row";
-    inputRow.style.cssText = "background:#fffbeb; border-top:2px solid #fbbf24;";
+    inputRow.className = "s-input-note";
     inputRow.innerHTML = `
-      <td style="padding:5px 8px; color:#92400e; white-space:nowrap; font-size:0.8rem;">${secondsToTs(atSeconds)}</td>
-      <td colspan="2" style="padding:4px 8px;">
-        <span style="font-size:0.75rem; color:#92400e; margin-right:6px;">${label}</span>
+      <td class="s-td s-note-ts">${secondsToTs(atSeconds)}</td>
+      <td colspan="2" class="s-td">
+        <span class="s-note-label">${label}</span>
         <input id="note-input-field" type="text" placeholder="Note text…"
-               style="width:60%; font-size:0.85rem; padding:2px 4px; border:1px solid #fbbf24; border-radius:3px; background:transparent;" />
+               class="s-input-field" style="width:60%;" />
       </td>`;
 
     if (insertAfter) insertAfter.after(inputRow);
@@ -764,11 +832,10 @@
 
   function buildNoteRow(note, type) {
     const tr = document.createElement("tr");
-    tr.className = `note-row note-${type.split("_")[1]}`;
+    tr.className = `note-row note-${type.split("_")[1]} s-note`;
     tr.setAttribute("data-note-id", note.id);
     tr.setAttribute("data-note-start", note.start_seconds);
     if (note.end_seconds) tr.setAttribute("data-note-end", note.end_seconds);
-    tr.style.cssText = "border-top:1px solid #fde68a; background:#fffbeb; cursor:pointer;";
 
     const timeLabel = type === "note_end"
       ? (note.end_ts ?? secondsToTs(note.end_seconds))
@@ -776,12 +843,11 @@
     const typeLabel = type === "note_start" ? "▶ note" : type === "note_end" ? "◀ note" : "♪ note";
 
     tr.innerHTML = `
-      <td style="padding:5px 8px; color:#92400e; white-space:nowrap; overflow:hidden; font-size:0.8rem;">${timeLabel}</td>
-      <td style="padding:5px 8px; color:#92400e; font-size:0.75rem; white-space:nowrap;">${typeLabel}</td>
-      <td style="padding:5px 8px; word-break:break-word; color:#78350f;">
-        <span class="note-text" title="Click to edit" style="cursor:text;">${escHtml(note.text)}</span>
-        <button class="note-delete-btn" data-note-id="${note.id}"
-                style="float:right; font-size:0.7rem; background:none; border:none; color:#b45309; cursor:pointer; padding:0 2px; line-height:1;">✕</button>
+      <td class="s-td s-note-ts">${timeLabel}</td>
+      <td class="s-td s-note-type">${typeLabel}</td>
+      <td class="s-td s-note-txt">
+        <span class="note-text s-note-text" title="Click to edit">${escHtml(note.text)}</span>
+        <button class="note-delete-btn s-note-del" data-note-id="${note.id}">✕</button>
       </td>`;
     return tr;
   }
@@ -795,8 +861,7 @@
   function startNoteEdit(span) {
     if (span.querySelector("input")) return;  // already editing
     const current = span.textContent;
-    span.innerHTML = `<input type="text" value="${escHtml(current)}"
-      style="width:100%; font-size:0.85rem; padding:1px 3px; border:1px solid #fbbf24; border-radius:3px; background:#fff; color:#78350f;" />`;
+    span.innerHTML = `<input type="text" value="${escHtml(current)}" class="s-edit-field" />`;
     const input = span.querySelector("input");
     input.focus();
     input.select();

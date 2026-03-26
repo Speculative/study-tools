@@ -87,21 +87,11 @@ export function showSpeedOverlay(container, speed) {
   let el = /** @type {HTMLElement | null} */ (container.querySelector(".speed-overlay"));
   if (!el) {
     el = document.createElement("div");
-    el.className = "speed-overlay";
-    el.style.cssText = [
-      "position:absolute", "inset:0", "display:flex",
-      "align-items:center", "justify-content:center",
-      "pointer-events:none", "z-index:10",
-    ].join(";");
-    container.style.position = "relative";
+    el.className = "speed-overlay absolute inset-0 flex items-center justify-center pointer-events-none z-10";
+    container.classList.add("relative");
     container.appendChild(el);
   }
-  el.innerHTML = `<span style="
-    font-size:3rem; font-weight:700; color:#fff;
-    background:rgba(0,0,0,0.45); border-radius:12px;
-    padding:8px 24px; letter-spacing:0.02em;
-    transition:opacity 0.15s;
-  ">${speed}x</span>`;
+  el.innerHTML = `<span class="text-5xl font-bold text-white bg-black/45 rounded-xl py-2 px-6 tracking-wide transition-opacity duration-150">${speed}x</span>`;
   el.style.opacity = "1";
 
   const prev = _overlayTimers.get(container);
