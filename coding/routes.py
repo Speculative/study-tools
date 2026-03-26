@@ -422,6 +422,38 @@ def codebook():
         notes_prop = pid_cells.get(_notes_col_id, "") if _notes_col_id is not None else ""
         uncategorized_groups.append({"pid": pid, "sections": sections, "total": total, "notes_prop": notes_prop})
 
+    # Build all_groups: same structure but includes assigned (non-hidden) notes too,
+    # with an "assigned" flag so JS can render them semi-transparent.
+    assigned_notes = [n for n in all_notes if not n["hidden"] and n["id"] in coded_note_ids]
+    all_pid_order: list[str] = list(pid_order)  # start with uncategorized pids in order
+    all_pid_section_notes: dict[str, dict[str, list]] = {
+        pid: {sec: [dict(n, assigned=False) for n in notes]
+              for sec, notes in pid_section_notes[pid].items()}
+        for pid in pid_order
+    }
+    for n in assigned_notes:
+        pid = n["pid"]
+        sec = _section_for_note(n)
+        if pid not in all_pid_section_notes:
+            all_pid_order.append(pid)
+            all_pid_section_notes[pid] = OrderedDict()
+        if sec not in all_pid_section_notes[pid]:
+            all_pid_section_notes[pid][sec] = []
+        all_pid_section_notes[pid][sec].append(dict(n, assigned=True))
+
+    # Sort notes within each sec by start_seconds, then build groups JSON-serialisable
+    all_groups_data = []
+    for pid in sorted(set(all_pid_order)):
+        sec_map = all_pid_section_notes.get(pid, {})
+        sections = []
+        for sec_name in sorted(sec_map.keys(), key=lambda s: (s == "", s)):
+            notes = sorted(sec_map[sec_name], key=lambda n: n["start_seconds"])
+            condition = _condition_for(pid, sec_name)
+            for n in notes:
+                n["condition"] = condition
+            sections.append({"name": sec_name, "notes": notes})
+        all_groups_data.append({"pid": pid, "sections": sections})
+
     # For each code, fetch its notes ordered by pid then start time
     for c in code_list:
         c["notes"] = list(db.execute(
@@ -436,8 +468,10 @@ def codebook():
             for r in c["notes"]
         ]
 
+    import json as _json
     return render_template("codebook.html", codes=code_list, uncategorized=uncategorized,
-                           uncategorized_groups=uncategorized_groups, hidden_notes=hidden_notes)
+                           uncategorized_groups=uncategorized_groups, hidden_notes=hidden_notes,
+                           all_groups_json=_json.dumps(all_groups_data))
 
 
 # ---------------------------------------------------------------------------

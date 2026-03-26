@@ -36,6 +36,7 @@
       <div class="ml-auto flex gap-1" onclick="event.stopPropagation()">
         <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllUncategorized(true)">collapse all</button>
         <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllUncategorized(false)">expand all</button>
+        <button id="all-notes-toggle" class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="toggleAllNotes()">show all</button>
       </div>
     </div>
     <!-- Hidden sentinel note-list so drag-drop always has a target -->
@@ -96,6 +97,7 @@
       {% endfor %}
     </div>
   </div>
+<script id="all-groups-data" type="application/json">{{ all_groups_json | safe }}</script>
 
     <!-- Hidden notes (collapsed by default) -->
     <div id="bin-hidden" class="rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -138,6 +140,12 @@
 
     <!-- Right column: named codes + new code -->
     <div id="right-col" class="flex flex-col gap-4 overflow-y-auto overflow-x-hidden p-4 flex-1 min-w-0">
+
+      <!-- Collapse/expand all codes -->
+      <div class="flex gap-1 justify-end" onclick="event.stopPropagation()">
+        <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllCodes(true)">collapse all</button>
+        <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllCodes(false)">expand all</button>
+      </div>
 
       <!-- Named codes -->
       {% for code in codes %}
@@ -255,8 +263,9 @@
   .note-chip.dragging-clone { opacity: 1; outline: 2px solid #60a5fa; outline-offset: 1px; cursor: copy; }
   .note-chip.dragging-clone::after { content: "+"; position: absolute; top: -6px; right: -6px; background: #3b82f6; color: white; border-radius: 9999px; width: 14px; height: 14px; font-size: 10px; line-height: 14px; text-align: center; }
   .note-chip.dragging-clone { position: relative; }
-  .code-bin.drag-over .note-list:not([style*="display:none"]) { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
+  .code-bin.drag-over .note-list:not(.hidden):not([style*="display:none"]) { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
   .code-bin.drag-over .bin-header { background-color: #eff6ff; }
+  .code-bin.drag-over:has(.bin-body.hidden) .bin-header { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
 </style>
 
 <script type="module">
@@ -508,6 +517,104 @@ function collapseAllUncategorized(collapse) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// All-notes mode: inject assigned notes into uncategorized pid/sec groups
+// ---------------------------------------------------------------------------
+let _allNotesOpen = false;
+const _allGroups = JSON.parse(document.getElementById("all-groups-data").textContent);
+
+function toggleAllNotes() {
+  _allNotesOpen = !_allNotesOpen;
+  document.getElementById("all-notes-toggle").textContent = _allNotesOpen ? "hide all" : "show all";
+  if (_allNotesOpen) {
+    _insertAllNoteChips();
+  } else {
+    _removeAllNoteChips();
+  }
+}
+
+function _insertAllNoteChips() {
+  const binBody = document.querySelector("#bin-uncategorized .bin-body");
+
+  for (const group of _allGroups) {
+    // Find or create pid-group
+    let pidGroup = binBody.querySelector(`.pid-group[data-pid="${CSS.escape(group.pid)}"]`);
+    if (!pidGroup) {
+      pidGroup = document.createElement("div");
+      pidGroup.className = "pid-group";
+      pidGroup.dataset.pid = group.pid;
+      pidGroup.dataset.allNotes = "1";
+      pidGroup.innerHTML =
+        `<div class="pid-header flex items-center gap-1.5 cursor-pointer select-none mb-1.5" onclick="togglePidGroup(this)">` +
+        `<span class="pid-chevron text-gray-300 text-xs">▼</span>` +
+        `<span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">${escHtml(group.pid)}</span>` +
+        `<span class="text-xs text-gray-300 pid-count"></span>` +
+        `</div><div class="pid-body flex flex-col gap-2 pl-3"></div>`;
+      binBody.appendChild(pidGroup);
+    }
+    const pidBody = pidGroup.querySelector(".pid-body");
+
+    for (const sec of group.sections) {
+      // Only inject assigned notes — unassigned are already present
+      const assignedNotes = sec.notes.filter(n => n.assigned);
+      if (!assignedNotes.length) continue;
+
+      // Find or create sec-group
+      let secGroup = pidBody.querySelector(`.sec-group[data-sec="${CSS.escape(sec.name)}"]`);
+      if (!secGroup) {
+        secGroup = document.createElement("div");
+        secGroup.className = "sec-group";
+        secGroup.dataset.sec = sec.name;
+        secGroup.dataset.allNotes = "1";
+        if (sec.name) {
+          secGroup.innerHTML =
+            `<div class="sec-header flex items-center gap-1.5 cursor-pointer select-none mb-1" onclick="toggleSecGroup(this)">` +
+            `<span class="sec-chevron text-gray-300 text-xs">▼</span>` +
+            `<span class="text-xs text-gray-400 italic">${escHtml(sec.name)}</span>` +
+            `<span class="text-xs text-gray-300 sec-count"></span>` +
+            `</div><div class="sec-body flex flex-wrap gap-2 pl-3"></div>`;
+        } else {
+          secGroup.innerHTML = `<div class="sec-body flex flex-wrap gap-2"></div>`;
+        }
+        pidBody.appendChild(secGroup);
+      }
+      const secBody = secGroup.querySelector(".sec-body");
+
+      for (const n of assignedNotes) {
+        const note = store.getNote(n.id);
+        if (!note) continue;
+        const chip = store.buildChip(note, "uncategorized", () => {});
+        chip.querySelector(".hide-btn")?.remove();
+        chip.draggable = false;
+        chip.classList.add("all-notes-chip");
+        chip.style.opacity = "0.45";
+        chip.style.cursor = "default";
+        // Insert in start-time order
+        const siblings = [...secBody.querySelectorAll(".note-chip")];
+        const after = siblings.find(c => +c.dataset.start > note.start);
+        if (after) secBody.insertBefore(chip, after);
+        else secBody.appendChild(chip);
+      }
+    }
+  }
+}
+
+function _removeAllNoteChips() {
+  document.querySelectorAll(".all-notes-chip").forEach(c => c.remove());
+  // Remove pid/sec groups that were created solely for all-notes mode
+  document.querySelectorAll("[data-all-notes='1']").forEach(el => el.remove());
+}
+
+function collapseAllCodes(collapse) {
+  document.querySelectorAll("#right-col .code-bin").forEach(bin => {
+    const body = bin.querySelector(".bin-body");
+    const chevron = bin.querySelector(".bin-chevron");
+    if (!body || !chevron) return;
+    body.classList.toggle("hidden", collapse);
+    chevron.textContent = collapse ? "▶" : "▼";
+  });
+}
+
 function togglePidGroup(headerEl) {
   const group = headerEl.closest(".pid-group");
   const body = group.querySelector(".pid-body");
@@ -745,7 +852,7 @@ Object.assign(window, {
   toggleBin, collapseAllUncategorized, togglePidGroup, toggleSecGroup,
   toggleHiddenBin, hideNote, unhideNote, deleteCode, startRenameCode,
   showNewCodeInput, hideNewCodeInput, submitNewCode, handleNewCodeKey,
-  closeLightbox, saveLightboxNote, openLightbox,
+  closeLightbox, saveLightboxNote, openLightbox, toggleAllNotes, collapseAllCodes,
 });
 
 // ---------------------------------------------------------------------------
