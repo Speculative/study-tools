@@ -145,6 +145,7 @@
       <div class="flex gap-1 justify-end" onclick="event.stopPropagation()">
         <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllCodes(true)">collapse all</button>
         <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllCodes(false)">expand all</button>
+        <button id="group-by-pid-toggle" class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="toggleGroupByPid()">group by participant</button>
       </div>
 
       <!-- Named codes -->
@@ -266,6 +267,7 @@
   .code-bin.drag-over .note-list:not(.hidden):not([style*="display:none"]) { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
   .code-bin.drag-over .bin-header { background-color: #eff6ff; }
   .code-bin.drag-over:has(.bin-body.hidden) .bin-header { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
+  .note-chip.pid-grouped-hidden { display: none; }
 </style>
 
 <script type="module">
@@ -410,9 +412,13 @@ document.addEventListener("drop", async e => {
   }
 
   updateCount(toBin);
+  if (_groupByPid) { _removePidGrouping(toBin); _applyPidGrouping(toBin); }
   if (!isClone && fromCodeId && fromCodeId !== toCodeId) {
     const fromBin = document.querySelector(`.code-bin[data-code-id="${fromCodeId}"]`);
-    if (fromBin) updateCount(fromBin);
+    if (fromBin) {
+      updateCount(fromBin);
+      if (_groupByPid) { _removePidGrouping(fromBin); _applyPidGrouping(fromBin); }
+    }
   }
 
   // --- Persist via store ---
@@ -613,6 +619,70 @@ function collapseAllCodes(collapse) {
     body.classList.toggle("hidden", collapse);
     chevron.textContent = collapse ? "▶" : "▼";
   });
+}
+
+// ---------------------------------------------------------------------------
+// Group by participant
+// ---------------------------------------------------------------------------
+let _groupByPid = false;
+
+function toggleGroupByPid() {
+  _groupByPid = !_groupByPid;
+  document.getElementById("group-by-pid-toggle").textContent =
+    _groupByPid ? "ungroup participants" : "group by participant";
+  document.querySelectorAll("#right-col .code-bin").forEach(bin => {
+    if (_groupByPid) _applyPidGrouping(bin);
+    else _removePidGrouping(bin);
+  });
+}
+
+const _conditionBg = { Logger: "#f0fdf4", Tracer: "#eff6ff", Breakpoints: "#faf5ff" };
+const _conditionBorder = { Logger: "#86efac", Tracer: "#93c5fd", Breakpoints: "#d8b4fe" };
+
+function _applyPidGrouping(bin) {
+  const noteList = bin.querySelector(".note-list");
+  if (!noteList) return;
+  const chips = [...noteList.querySelectorAll(".note-chip:not(.all-notes-chip)")];
+  // Collect unique pids in sorted order, and their conditions
+  const pidConditions = new Map(); // pid -> Set<condition>
+  for (const c of chips) {
+    const pid = c.dataset.pid;
+    if (!pidConditions.has(pid)) pidConditions.set(pid, new Set());
+    if (c.dataset.condition) pidConditions.get(pid).add(c.dataset.condition);
+  }
+  const pids = [...pidConditions.keys()].sort();
+  // Hide all note chips
+  chips.forEach(c => c.classList.add("pid-grouped-hidden"));
+  // Insert pid summary chips
+  for (const pid of pids) {
+    const conditions = [...pidConditions.get(pid)].filter(c => _conditionBg[c]);
+    const chip = document.createElement("div");
+    chip.dataset.pidSummary = pid;
+    chip.className = "pid-summary-chip border rounded px-2.5 py-1.5 text-sm select-none overflow-hidden relative";
+    if (conditions.length >= 2) {
+      const [c1, c2] = conditions;
+      chip.style.background = `linear-gradient(to bottom left, ${_conditionBg[c1]} 50%, ${_conditionBg[c2]} 50%)`;
+      chip.style.borderTopColor = _conditionBorder[c1];
+      chip.style.borderRightColor = _conditionBorder[c1];
+      chip.style.borderBottomColor = _conditionBorder[c2];
+      chip.style.borderLeftColor = _conditionBorder[c2];
+    } else if (conditions.length === 1) {
+      chip.style.background = _conditionBg[conditions[0]];
+      chip.style.borderColor = _conditionBorder[conditions[0]];
+    } else {
+      chip.style.background = "#f9fafb";
+      chip.style.borderColor = "#e5e7eb";
+    }
+    chip.innerHTML = `<span class="text-gray-500 font-medium text-xs">${escHtml(pid)}</span>`;
+    noteList.appendChild(chip);
+  }
+}
+
+function _removePidGrouping(bin) {
+  const noteList = bin.querySelector(".note-list");
+  if (!noteList) return;
+  noteList.querySelectorAll(".pid-summary-chip").forEach(c => c.remove());
+  noteList.querySelectorAll(".pid-grouped-hidden").forEach(c => c.classList.remove("pid-grouped-hidden"));
 }
 
 function togglePidGroup(headerEl) {
@@ -852,7 +922,7 @@ Object.assign(window, {
   toggleBin, collapseAllUncategorized, togglePidGroup, toggleSecGroup,
   toggleHiddenBin, hideNote, unhideNote, deleteCode, startRenameCode,
   showNewCodeInput, hideNewCodeInput, submitNewCode, handleNewCodeKey,
-  closeLightbox, saveLightboxNote, openLightbox, toggleAllNotes, collapseAllCodes,
+  closeLightbox, saveLightboxNote, openLightbox, toggleAllNotes, collapseAllCodes, toggleGroupByPid,
 });
 
 // ---------------------------------------------------------------------------
