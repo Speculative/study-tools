@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Codebook{% endblock %}
 {% block body %}
-<style>html, body { overflow: hidden; height: 100%; margin: 0; }</style>
+<style>html, body { overflow: hidden; height: 100%; margin: 0; } #split-container { padding-bottom: 48px; }</style>
 <div class="flex flex-col h-screen overflow-hidden bg-gray-50 text-gray-900">
 
   <!-- Top nav (matches base.html) -->
@@ -156,6 +156,7 @@
         <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllCodes(true)">collapse all</button>
         <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="collapseAllCodes(false)">expand all</button>
         <button id="group-by-pid-toggle" class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="toggleGroupByPid()">group by participant</button>
+        <button class="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100" onclick="exportMarkdown()">export md</button>
       </div>
 
       <!-- Named codes -->
@@ -226,6 +227,15 @@
   </div><!-- /split-container -->
 </div><!-- /page root -->
 
+<!-- Copy dock -->
+<div id="copy-dock" class="fixed bottom-0 left-0 right-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur-sm">
+  <div class="flex items-center gap-3 px-4 py-2 min-h-12">
+    <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide flex-shrink-0 select-none">Dock</span>
+    <div id="dock-chips" class="flex flex-wrap gap-2 flex-1 min-h-6"></div>
+    <button class="text-xs text-gray-300 hover:text-gray-500 flex-shrink-0" onclick="clearDock()" title="Clear dock">clear</button>
+  </div>
+</div>
+
 <!-- Drop indicator bar (shared, moved around the DOM) -->
 
 <!-- Video lightbox -->
@@ -278,6 +288,8 @@
   .code-bin.drag-over .bin-header { background-color: #eff6ff; }
   .code-bin.drag-over:has(.bin-body.hidden) .bin-header { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
   .note-chip.pid-grouped-hidden { display: none; }
+  #copy-dock.drag-over { background-color: #eff6ff; border-color: #93c5fd; }
+  #copy-dock.drag-over #dock-chips { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
 </style>
 
 <script type="module">
@@ -327,16 +339,17 @@ document.addEventListener("dragstart", e => {
   const chip = e.target.closest(".note-chip");
   if (!chip) return;
   const bin = chip.closest(".code-bin");
+  const inDock = !!chip.closest("#dock-chips");
   const forceClone = chip.classList.contains("all-notes-chip");
   const isClone = forceClone || e.ctrlKey;
   _dragging = {
     noteId: +chip.dataset.noteId,
-    fromCodeId: bin ? bin.dataset.codeId : null,
+    fromCodeId: inDock ? "dock" : (bin ? bin.dataset.codeId : null),
     el: chip,
     clone: isClone,
   };
   // Use rAF so the chip hasn't visually moved yet when screenshot is taken
-  e.dataTransfer.effectAllowed = isClone ? "copy" : "move";
+  e.dataTransfer.effectAllowed = "copyMove";
   requestAnimationFrame(() => chip.classList.add(isClone ? "dragging-clone" : "dragging"));
 });
 
@@ -352,23 +365,31 @@ document.addEventListener("dragend", () => {
 // ---------------------------------------------------------------------------
 document.addEventListener("dragover", e => {
   if (!_dragging) return;
+  const dock = e.target.closest("#copy-dock");
   const bin = e.target.closest(".code-bin");
-  if (!bin) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = _dragging.clone ? "copy" : "move";
-
-  document.querySelectorAll(".code-bin.drag-over").forEach(b => {
-    if (b !== bin) b.classList.remove("drag-over");
-  });
-  bin.classList.add("drag-over");
-  _dropTarget = { codeId: bin.dataset.codeId };
+  if (dock) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    document.querySelectorAll(".code-bin.drag-over").forEach(b => b.classList.remove("drag-over"));
+    dock.classList.add("drag-over");
+    _dropTarget = { codeId: "dock" };
+  } else if (bin) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = _dragging.clone ? "copy" : "move";
+    document.querySelectorAll(".code-bin.drag-over").forEach(b => {
+      if (b !== bin) b.classList.remove("drag-over");
+    });
+    document.getElementById("copy-dock").classList.remove("drag-over");
+    bin.classList.add("drag-over");
+    _dropTarget = { codeId: bin.dataset.codeId };
+  }
 });
 
 document.addEventListener("dragleave", e => {
   const bin = e.target.closest(".code-bin");
-  if (bin && !bin.contains(e.relatedTarget)) {
-    bin.classList.remove("drag-over");
-  }
+  if (bin && !bin.contains(e.relatedTarget)) bin.classList.remove("drag-over");
+  const dock = e.target.closest("#copy-dock");
+  if (dock && !dock.contains(e.relatedTarget)) dock.classList.remove("drag-over");
 });
 
 // ---------------------------------------------------------------------------
@@ -389,12 +410,22 @@ document.addEventListener("drop", async e => {
   if (!_dragging || !_dropTarget) return;
   e.preventDefault();
   document.querySelectorAll(".code-bin.drag-over").forEach(b => b.classList.remove("drag-over"));
+  document.getElementById("copy-dock").classList.remove("drag-over");
 
   const { noteId, fromCodeId, el: chip, clone: isClone } = _dragging;
   const { codeId: toCodeId } = _dropTarget;
   _dragging = null;
   _dropTarget = null;
   chip.classList.remove("dragging", "dragging-clone");
+
+  // --- Drop onto dock ---
+  if (toCodeId === "dock") {
+    if (fromCodeId === "dock") return; // no-op: already in dock
+    const note = store.getNote(noteId);
+    if (!note) return;
+    addToDock(note);
+    return;
+  }
 
   const toBin = document.querySelector(`.code-bin[data-code-id="${toCodeId}"]`);
   if (!toBin) return;
@@ -416,6 +447,11 @@ document.addEventListener("drop", async e => {
     store.restyleChip(activeChip, context, (btn) => hideNote(btn));
   }
 
+  // If moving (not copying) from dock, detach chip from dock before inserting elsewhere
+  if (fromCodeId === "dock" && !isClone) {
+    chip.remove();
+  }
+
   // Insert in sorted order for code bins; uncategorized gets appended (it re-sorts on reload)
   if (inCode) {
     insertChipSorted(toList, activeChip);
@@ -434,9 +470,9 @@ document.addEventListener("drop", async e => {
   }
 
   // --- Persist via store ---
-  const movedBetweenCodes = fromCodeId !== toCodeId;
+  const movedBetweenCodes = fromCodeId !== toCodeId && fromCodeId !== "dock";
 
-  if (isClone) {
+  if (isClone || fromCodeId === "dock") {
     if (inCode) await store.assignNote(+toCodeId, noteId);
   } else if (movedBetweenCodes) {
     if (inCode) await store.assignNote(+toCodeId, noteId);
@@ -453,6 +489,27 @@ document.addEventListener("drop", async e => {
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// Copy dock
+// ---------------------------------------------------------------------------
+function addToDock(note) {
+  const chip = store.buildChip(note, "uncategorized", () => {});
+  chip.querySelector(".hide-btn")?.remove();
+  chip.classList.add("dock-chip");
+  // Remove button to pull out of dock
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none";
+  removeBtn.title = "Remove from dock";
+  removeBtn.textContent = "×";
+  removeBtn.onclick = (ev) => { ev.stopPropagation(); chip.remove(); };
+  chip.appendChild(removeBtn);
+  document.getElementById("dock-chips").appendChild(chip);
+}
+
+function clearDock() {
+  document.getElementById("dock-chips").innerHTML = "";
+}
 
 function updateCount(bin) {
   const n = bin.querySelectorAll(".note-chip").length;
@@ -860,6 +917,43 @@ document.addEventListener("keydown", e => {
 // ---------------------------------------------------------------------------
 // Code search / filter
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Markdown export
+// ---------------------------------------------------------------------------
+function exportMarkdown() {
+  const lines = [];
+  document.querySelectorAll("#right-col .code-bin").forEach(bin => {
+    const name = bin.querySelector(".code-name")?.textContent.trim();
+    if (!name) return;
+    // Collect notes from DOM chips (excludes all-notes-chip context copies)
+    const chips = [...bin.querySelectorAll(".note-chip:not(.all-notes-chip)")];
+    if (!chips.length) return;
+    // Sort by pid then start
+    chips.sort((a, b) => {
+      if (a.dataset.pid < b.dataset.pid) return -1;
+      if (a.dataset.pid > b.dataset.pid) return 1;
+      return (+a.dataset.start) - (+b.dataset.start);
+    });
+    lines.push(`## ${name}`, "");
+    for (const chip of chips) {
+      const pid = chip.dataset.pid;
+      const start = +chip.dataset.start;
+      const mm = String(Math.floor(start / 60)).padStart(2, "0");
+      const ss = String(start % 60).padStart(2, "0");
+      const text = chip.dataset.text || chip.querySelector("span:nth-child(2)")?.textContent.trim() || "";
+      lines.push(`- ${pid} - ${mm}:${ss} - ${text}`);
+    }
+    lines.push("");
+  });
+
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "codebook.md";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 function openCodeSearch() {
   const bar = document.getElementById("code-search-bar");
   bar.classList.remove("hidden");
@@ -949,8 +1043,8 @@ async function saveLightboxNote() {
     // Update all matching chips in the DOM
     document.querySelectorAll(`.note-chip[data-note-id="${_lbNoteId}"]`).forEach(chip => {
       chip.dataset.text = newText;
-      const spans = chip.querySelectorAll("span");
-      if (spans[1]) spans[1].textContent = newText;
+      const textSpan = chip.querySelector(":scope > span:nth-child(2)");
+      if (textSpan) textSpan.textContent = newText;
     });
     document.getElementById("lb-text").textContent = newText;
     btn.textContent = "Saved";
@@ -974,7 +1068,7 @@ Object.assign(window, {
   toggleHiddenBin, hideNote, unhideNote, deleteCode, startRenameCode,
   showNewCodeInput, hideNewCodeInput, submitNewCode, handleNewCodeKey,
   closeLightbox, saveLightboxNote, openLightbox, toggleAllNotes, collapseAllCodes, toggleGroupByPid,
-  openCodeSearch, closeCodeSearch, filterCodes,
+  openCodeSearch, closeCodeSearch, filterCodes, exportMarkdown, clearDock,
 });
 
 // ---------------------------------------------------------------------------
