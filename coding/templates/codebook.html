@@ -20,6 +20,16 @@
     <!-- Left column: Uncategorized + Hidden -->
     <div id="left-col" class="flex flex-col gap-4 overflow-y-auto overflow-x-hidden p-4 min-w-0" style="width:50%">
 
+    <!-- Note search bar (shown on Ctrl+S) -->
+    <div id="note-search-bar" class="hidden flex items-center gap-2 bg-white border border-gray-300 rounded px-2 py-1 shadow-sm">
+      <span class="text-xs text-gray-400">🔍</span>
+      <input id="note-search-input" type="text" class="flex-1 text-sm focus:outline-none" placeholder="Search notes…"
+        oninput="filterUncategorized(this.value)"
+        onkeydown="if(event.key==='Escape'){closeNoteSearch();}"
+      />
+      <button class="text-gray-300 hover:text-gray-500 text-sm leading-none" onclick="closeNoteSearch()">×</button>
+    </div>
+
   <!-- Uncategorized -->
   <div
     id="bin-uncategorized"
@@ -288,6 +298,8 @@
   .code-bin.drag-over .bin-header { background-color: #eff6ff; }
   .code-bin.drag-over:has(.bin-body.hidden) .bin-header { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
   .note-chip.pid-grouped-hidden { display: none; }
+  .note-search-hidden { display: none !important; }
+  .note-search-highlight { background-color: #fef08a; border-radius: 2px; padding: 0 1px; }
   #copy-dock.drag-over { background-color: #eff6ff; border-color: #93c5fd; }
   #copy-dock.drag-over #dock-chips { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 4px; }
 </style>
@@ -912,6 +924,13 @@ document.addEventListener("keydown", e => {
       openCodeSearch();
     }
   }
+  if (e.key === "s" && (e.ctrlKey || e.metaKey)) {
+    const lightboxOpen = !document.getElementById("lightbox-overlay").classList.contains("hidden");
+    if (!lightboxOpen) {
+      e.preventDefault();
+      openNoteSearch();
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -975,6 +994,72 @@ function filterCodes(query) {
     }
     const name = bin.querySelector(".code-name")?.textContent.toLowerCase() ?? "";
     bin.classList.toggle("hidden", !name.includes(q));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Note search (Ctrl+S)
+// ---------------------------------------------------------------------------
+function openNoteSearch() {
+  document.getElementById("note-search-bar").classList.remove("hidden");
+  document.getElementById("note-search-input").focus();
+}
+
+function closeNoteSearch() {
+  document.getElementById("note-search-bar").classList.add("hidden");
+  document.getElementById("note-search-input").value = "";
+  filterUncategorized("");
+}
+
+function filterUncategorized(query) {
+  const q = query.trim().toLowerCase();
+  const binBody = document.querySelector("#bin-uncategorized .bin-body");
+
+  // Restore all highlights and visibility first
+  binBody.querySelectorAll(".note-chip").forEach(chip => {
+    chip.classList.remove("note-search-hidden");
+    const textSpan = chip.querySelector(":scope > span:nth-child(2)");
+    if (textSpan && textSpan.dataset.originalText !== undefined) {
+      textSpan.textContent = textSpan.dataset.originalText;
+      delete textSpan.dataset.originalText;
+    }
+  });
+
+  if (q) {
+    binBody.querySelectorAll(".note-chip").forEach(chip => {
+      const text = (chip.dataset.text || "").toLowerCase();
+      if (!text.includes(q)) {
+        chip.classList.add("note-search-hidden");
+      } else {
+        // Highlight matching substring
+        const textSpan = chip.querySelector(":scope > span:nth-child(2)");
+        if (textSpan) {
+          const original = chip.dataset.text || textSpan.textContent;
+          textSpan.dataset.originalText = original;
+          const lower = original.toLowerCase();
+          let result = "";
+          let i = 0;
+          while (i < original.length) {
+            const idx = lower.indexOf(q, i);
+            if (idx === -1) { result += escHtml(original.slice(i)); break; }
+            result += escHtml(original.slice(i, idx));
+            result += `<mark class="note-search-highlight">${escHtml(original.slice(idx, idx + q.length))}</mark>`;
+            i = idx + q.length;
+          }
+          textSpan.innerHTML = result;
+        }
+      }
+    });
+  }
+
+  // Show/hide sec-groups and pid-groups based on whether they have any visible chips
+  binBody.querySelectorAll(".sec-group").forEach(sec => {
+    const hasVisible = sec.querySelector(".note-chip:not(.note-search-hidden)");
+    sec.classList.toggle("note-search-hidden", !hasVisible);
+  });
+  binBody.querySelectorAll(".pid-group").forEach(pid => {
+    const hasVisible = pid.querySelector(".note-chip:not(.note-search-hidden)");
+    pid.classList.toggle("note-search-hidden", !hasVisible);
   });
 }
 
@@ -1069,6 +1154,7 @@ Object.assign(window, {
   showNewCodeInput, hideNewCodeInput, submitNewCode, handleNewCodeKey,
   closeLightbox, saveLightboxNote, openLightbox, toggleAllNotes, collapseAllCodes, toggleGroupByPid,
   openCodeSearch, closeCodeSearch, filterCodes, exportMarkdown, clearDock,
+  openNoteSearch, closeNoteSearch, filterUncategorized,
 });
 
 // ---------------------------------------------------------------------------
