@@ -55,7 +55,9 @@ def _seconds_to_ts(s) -> str:
     h = s // 3600
     m = (s % 3600) // 60
     sec = s % 60
-    return f"{h:02d}:{m:02d}:{sec:02d}"
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{sec:02d}"
+    return f"{m:02d}:{sec:02d}"
 
 
 def _merge_rows(utterances: list[dict], sections: list[dict], notes: list[dict]) -> list[dict]:
@@ -337,6 +339,17 @@ def codebook():
                 break
         return name
 
+    def _section_start_for_note(note: dict) -> int | None:
+        """Return start_seconds of the section containing this note, or None."""
+        pid_sections = sections_by_pid.get(note["pid"], [])
+        sec_start = None
+        for s in pid_sections:
+            if s["start_seconds"] <= note["start_seconds"]:
+                sec_start = s["start_seconds"]
+            else:
+                break
+        return sec_start
+
     # Build: uncategorized_groups = [{pid, sections: [{name, notes:[]}]}]
     pid_order: list[str] = []
     pid_section_notes: dict[str, dict[str, list]] = {}  # pid -> section_name -> notes
@@ -348,6 +361,7 @@ def codebook():
             pid_section_notes[pid] = OrderedDict()
         if sec not in pid_section_notes[pid]:
             pid_section_notes[pid][sec] = []
+        n["section_start_seconds"] = _section_start_for_note(n)
         pid_section_notes[pid][sec].append(n)
 
     # Fetch sheet columns and cells for display in uncategorized groups
@@ -439,7 +453,7 @@ def codebook():
             all_pid_section_notes[pid] = OrderedDict()
         if sec not in all_pid_section_notes[pid]:
             all_pid_section_notes[pid][sec] = []
-        all_pid_section_notes[pid][sec].append(dict(n, assigned=True))
+        all_pid_section_notes[pid][sec].append(dict(n, assigned=True, section_start_seconds=_section_start_for_note(n)))
 
     # Sort notes within each sec by start_seconds, then build groups JSON-serialisable
     all_groups_data = []
@@ -470,9 +484,13 @@ def codebook():
         ).fetchall())
         c["notes"] = [
             {"id": r[0], "pid": r[1], "text": r[2], "start_seconds": r[3], "end_seconds": r[4],
-             "condition": _condition_for(r[1], _section_for_note({"pid": r[1], "start_seconds": r[3]}))}
+             "condition": _condition_for(r[1], _section_for_note({"pid": r[1], "start_seconds": r[3]})),
+             "section_start_seconds": _section_start_for_note({"pid": r[1], "start_seconds": r[3]})}
             for r in c["notes"]
         ]
+
+    for n in hidden_notes:
+        n["section_start_seconds"] = _section_start_for_note(n)
 
     import json as _json
     return render_template("codebook.html", codes=code_list, uncategorized=uncategorized,

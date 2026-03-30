@@ -18,6 +18,7 @@ import { escHtml, secondsToTs } from "./player.js";
  * @property {number}      start
  * @property {number|null}  end
  * @property {string}      condition
+ * @property {number|null}  sectionStart
  */
 
 /**
@@ -48,7 +49,7 @@ const hidden = new Set();
  * Populate the store from server-rendered data.
  *
  * @param {{id:number, name:string, noteIds:number[]}[]} codeDefs
- * @param {{id:number, pid:string, text:string, start:number, end:number|null, condition:string}[]} noteDefs
+ * @param {{id:number, pid:string, text:string, start:number, end:number|null, condition:string, sectionStart:number|null}[]} noteDefs
  * @param {number[]} hiddenIds
  */
 export function init(codeDefs, noteDefs, hiddenIds) {
@@ -57,7 +58,7 @@ export function init(codeDefs, noteDefs, hiddenIds) {
   hidden.clear();
 
   for (const n of noteDefs) {
-    notes.set(n.id, { id: n.id, pid: n.pid, text: n.text, start: n.start, end: n.end, condition: n.condition });
+    notes.set(n.id, { id: n.id, pid: n.pid, text: n.text, start: n.start, end: n.end, condition: n.condition, sectionStart: n.sectionStart ?? null });
   }
   for (const c of codeDefs) {
     codes.set(c.id, { id: c.id, name: c.name, noteIds: new Set(c.noteIds) });
@@ -246,8 +247,9 @@ export async function deleteCodeInStore(codeId) {
  * @returns {string}
  */
 function formatNoteTs(note) {
-  const s = secondsToTs(note.start);
-  return note.end != null ? `${s}–${secondsToTs(note.end)}` : s;
+  const offset = note.sectionStart ?? 0;
+  const s = secondsToTs(note.start - offset);
+  return note.end != null ? `${s}–${secondsToTs(note.end - offset)}` : s;
 }
 
 /**

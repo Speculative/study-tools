@@ -91,10 +91,13 @@
                 data-pid="{{ note.pid }}"
                 data-start="{{ note.start_seconds }}"
                 data-end="{{ note.end_seconds if note.end_seconds is not none else '' }}"
+                data-section-start="{{ note.section_start_seconds if note.section_start_seconds is not none else '' }}"
                 data-text="{{ note.text }}"
                 data-condition="{{ note.condition }}"
               >
-                <span class="text-gray-400 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
+                {% set rel_start = (note.start_seconds - note.section_start_seconds) if note.section_start_seconds is not none else note.start_seconds %}
+                {% set rel_end = (note.end_seconds - note.section_start_seconds) if (note.end_seconds is not none and note.section_start_seconds is not none) else note.end_seconds %}
+                <span class="text-gray-400 text-xs mr-1">{{ note.pid }}·{{ rel_start | ts }}{% if note.end_seconds is not none %}–{{ rel_end | ts }}{% endif %}</span
                 ><span class="text-gray-800">{{ note.text }}</span
                 ><button class="hide-btn ml-1 px-0.5 text-gray-300 hover:text-gray-500 text-sm leading-none" onclick="event.stopPropagation(); hideNote(this)" title="Hide">×</button>
               </div>
@@ -128,10 +131,13 @@
         data-pid="{{ note.pid }}"
         data-start="{{ note.start_seconds }}"
         data-end="{{ note.end_seconds if note.end_seconds is not none else '' }}"
+        data-section-start="{{ note.section_start_seconds if note.section_start_seconds is not none else '' }}"
         data-text="{{ note.text }}"
         data-hidden="1"
       >
-        <span class="text-gray-400 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
+        {% set rel_start = (note.start_seconds - note.section_start_seconds) if note.section_start_seconds is not none else note.start_seconds %}
+        {% set rel_end = (note.end_seconds - note.section_start_seconds) if (note.end_seconds is not none and note.section_start_seconds is not none) else note.end_seconds %}
+        <span class="text-gray-400 text-xs mr-1">{{ note.pid }}·{{ rel_start | ts }}{% if note.end_seconds is not none %}–{{ rel_end | ts }}{% endif %}</span
         ><span class="text-gray-500">{{ note.text }}</span>
         <button
           class="ml-1 text-gray-400 hover:text-blue-500 text-xs"
@@ -199,10 +205,13 @@
             data-pid="{{ note.pid }}"
             data-start="{{ note.start_seconds }}"
             data-end="{{ note.end_seconds if note.end_seconds is not none else '' }}"
+            data-section-start="{{ note.section_start_seconds if note.section_start_seconds is not none else '' }}"
             data-text="{{ note.text }}"
             data-condition="{{ note.condition }}"
           >
-            <span class="text-blue-300 text-xs mr-1">{{ note.pid }}·{{ note.start_seconds | ts }}{% if note.end_seconds is not none %}–{{ note.end_seconds | ts }}{% endif %}</span
+            {% set rel_start = (note.start_seconds - note.section_start_seconds) if note.section_start_seconds is not none else note.start_seconds %}
+            {% set rel_end = (note.end_seconds - note.section_start_seconds) if (note.end_seconds is not none and note.section_start_seconds is not none) else note.end_seconds %}
+            <span class="text-blue-300 text-xs mr-1">{{ note.pid }}·{{ rel_start | ts }}{% if note.end_seconds is not none %}–{{ rel_end | ts }}{% endif %}</span
             ><span class="text-gray-800">{{ note.text }}</span
             ><button class="hide-btn ml-1 px-0.5 text-blue-200 hover:text-blue-400 text-sm leading-none" onclick="event.stopPropagation(); hideNote(this)" title="Hide">×</button>
           </div>
@@ -319,6 +328,7 @@ import * as store from "{{ url_for('static', filename='codebook-store.js') }}";
       id: +ds.noteId, pid: ds.pid || "", text: ds.text || "",
       start: +(ds.start || 0), end: ds.end ? +ds.end : null,
       condition: ds.condition || "",
+      sectionStart: ds.sectionStart ? +ds.sectionStart : null,
     });
   });
   // Deduplicate (a note can appear in multiple bins)
